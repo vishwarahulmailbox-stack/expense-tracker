@@ -145,7 +145,7 @@ fun BankCard(a: Account, modifier: Modifier = Modifier) {
     Box(
         modifier
             .fillMaxWidth()
-            .aspectRatio(1.9f)
+            .aspectRatio(2.15f)
             .clip(RoundedCornerShape(20.dp))
             .background(Brush.linearGradient(listOf(Color(c1), Color(c2)))),
     ) {

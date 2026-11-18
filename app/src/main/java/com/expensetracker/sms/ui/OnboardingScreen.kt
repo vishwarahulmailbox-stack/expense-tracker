@@ -85,7 +85,7 @@ fun OnboardingScreen(
                 Spacer(Modifier.width(12.dp))
                 Text(
                     "Expense Tracker needs SMS access to read transaction messages from banks, cards and UPI apps, " +
-                        "including new messages as they arrive. Only the amount, merchant, account ending and date are saved. " +
+                        "including new messages as they arrive. For each transaction it saves the amount, merchant, account ending, date and the message itself. " +
                         "Personal messages and OTPs are ignored. Everything is processed on this device and is never uploaded or shared.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

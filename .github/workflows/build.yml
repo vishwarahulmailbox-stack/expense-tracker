@@ -69,3 +69,15 @@ jobs:
         with:
           name: screenshots
           path: app/build/outputs/roborazzi/
+
+      - name: Publish screenshots to the 'screenshots' branch
+        if: always()
+        run: |
+          set -e
+          mkdir -p /tmp/shots && cp app/build/outputs/roborazzi/*.png /tmp/shots/ || exit 0
+          cd /tmp/shots
+          git init -q -b screenshots
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A && git commit -q -m "Screenshots for ${{ github.sha }}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" screenshots

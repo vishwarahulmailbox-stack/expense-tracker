@@ -109,7 +109,7 @@ class ScreenshotTest {
     @Test fun onboarding() = shot("5_onboarding") { OnboardingScreen(false, {}, {}, {}) }
     @Test fun onboardingDenied() = shot("5b_onboarding_denied") { OnboardingScreen(true, {}, {}, {}) }
     @Test fun editSheet() = shot("6_edit_sheet") { Box { TxnEditorContent(txns[0], { _, _ -> }, {}) } }
-    @Test fun addSheet() = shot("7_add_sheet") { AddTxnContent {} }
+    @Test fun addSheet() = shot("7_add_sheet") { AddTxnContent(onSave = {}) }
     @Test fun categories() = shot("9_categories") { CategoriesScreen({ _, _ -> }, {}) }
     @Test fun categoryEditor() = shot("9b_category_editor") { CategoryEditorContent(null, CatType.EXPENSE, { _, _ -> }) }
     @Test fun budgetSheet() = shot("8_budget_sheet") {

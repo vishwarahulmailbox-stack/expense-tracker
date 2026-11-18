@@ -52,13 +52,16 @@ object Categories {
         else -> "📦"
     }
 
-    private val palette = listOf(
-        0xFFEF6C00, 0xFF43A047, 0xFFD81B60, 0xFF1E88E5, 0xFF6D4C41,
-        0xFFFDD835, 0xFF8E24AA, 0xFFE53935, 0xFF00ACC1, 0xFF3949AB,
-        0xFF5E35B1, 0xFF00897B, 0xFF7CB342, 0xFF546E7A, 0xFF757575, 0xFF2E7D32,
+    private val colors = mapOf(
+        "Food" to 0xFFF97316, "Groceries" to 0xFF22C55E, "Shopping" to 0xFFEC4899,
+        "Travel" to 0xFF3B82F6, "Fuel" to 0xFFB45309, "Bills" to 0xFFEAB308,
+        "Rent" to 0xFF8B5CF6, "Entertainment" to 0xFFEF4444, "Health" to 0xFF06B6D4,
+        "Education" to 0xFF6366F1, "EMI/Loan" to 0xFF64748B, "Investment" to 0xFF10B981,
+        "Transfers" to 0xFF0EA5E9, "ATM/Cash" to 0xFF84CC16, "Others" to 0xFF94A3B8,
+        INCOME to 0xFF16A34A,
     )
 
-    fun color(c: String): Color = Color(palette[all.indexOf(c).coerceAtLeast(0) % palette.size])
+    fun color(c: String): Color = Color(colors[c] ?: 0xFF94A3B8)
 }
 
 fun fmt(v: Double): String {

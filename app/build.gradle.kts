@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("io.github.takahirom.roborazzi")
 }
 
 val buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
@@ -48,6 +49,12 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
     }
     lint {
         abortOnError = false
@@ -66,5 +73,15 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
+
+    // Screenshot tests (run on CI with Robolectric, no phone needed)
+    testImplementation(bom)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.39.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.39.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

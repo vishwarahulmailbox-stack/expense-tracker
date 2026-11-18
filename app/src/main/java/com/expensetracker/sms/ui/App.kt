@@ -11,37 +11,34 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Receipt
+import androidx.compose.material.icons.outlined.Savings
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Receipt
+import androidx.compose.material.icons.rounded.Savings
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,31 +46,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expensetracker.sms.AppViewModel
+import com.expensetracker.sms.Categories
 import com.expensetracker.sms.Txn
-
-@Composable
-fun AppTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val ctx = LocalContext.current
-    val scheme = when {
-        Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        dark -> darkColorScheme(primary = Color(0xFF81C784))
-        else -> lightColorScheme(primary = Color(0xFF2E7D32))
-    }
-    MaterialTheme(colorScheme = scheme, content = content)
-}
 
 private fun permissions(): Array<String> {
     val list = mutableListOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
@@ -84,12 +65,22 @@ private fun permissions(): Array<String> {
 private fun hasSms(ctx: Context) =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
 
+private fun openAppSettings(ctx: Context) {
+    ctx.startActivity(
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+}
+
 @Composable
 fun App(vm: AppViewModel = viewModel()) {
     val ctx = LocalContext.current
     var granted by remember { mutableStateOf(hasSms(ctx)) }
+    var denied by rememberSaveable { mutableStateOf(false) }
+    var showPrivacy by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         granted = hasSms(ctx)
+        denied = !granted
     }
     LifecycleResumeEffect(Unit) {
         granted = hasSms(ctx)
@@ -97,64 +88,37 @@ fun App(vm: AppViewModel = viewModel()) {
     }
 
     if (!granted) {
-        PermissionScreen(
-            onAllow = { launcher.launch(permissions()) },
-            onOpenSettings = {
-                ctx.startActivity(
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            },
+        OnboardingScreen(
+            permissionDenied = denied,
+            onContinue = { launcher.launch(permissions()) },
+            onOpenSettings = { openAppSettings(ctx) },
+            onPrivacy = { showPrivacy = true },
         )
-        return
+    } else {
+        LaunchedEffect(Unit) { vm.importIfFirstRun() }
+        MainScaffold(vm, onPrivacy = { showPrivacy = true })
     }
+    if (showPrivacy) PrivacyDialog { showPrivacy = false }
+}
 
-    LaunchedEffect(Unit) { vm.importIfFirstRun() }
-    MainScaffold(vm)
+enum class Dest(val label: String, val icon: ImageVector, val selected: ImageVector) {
+    Home("Home", Icons.Outlined.Home, Icons.Rounded.Home),
+    Txns("Transactions", Icons.Outlined.Receipt, Icons.Rounded.Receipt),
+    Budget("Budgets", Icons.Outlined.Savings, Icons.Rounded.Savings),
+    Settings("Settings", Icons.Outlined.Settings, Icons.Rounded.Settings),
+}
+
+private sealed interface BudgetEdit {
+    data class Of(val category: String?) : BudgetEdit
 }
 
 @Composable
-private fun PermissionScreen(onAllow: () -> Unit, onOpenSettings: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().statusBarsPadding().padding(28.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("💸", fontSize = 64.sp)
-        Spacer(Modifier.height(16.dp))
-        Text("SMS Expense Tracker", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "Your expenses are tracked automatically from bank, UPI and card SMS.\n\n" +
-                "• Only transaction messages are read — OTPs and personal chats are skipped\n" +
-                "• Everything stays on your phone. No internet, no account.",
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onAllow, modifier = Modifier.fillMaxWidth()) { Text("Allow SMS access") }
-        Spacer(Modifier.height(8.dp))
-        TextButton(onClick = onOpenSettings) { Text("Not working? Open app settings") }
-        Text(
-            "If Android says the setting is restricted: App info → ⋮ (top right) → Allow restricted settings, then try again.",
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-enum class Tab(val label: String, val emoji: String) {
-    Home("Overview", "🏠"),
-    Txns("Transactions", "📋"),
-    Budget("Budget", "🎯"),
-}
-
-@Composable
-private fun MainScaffold(vm: AppViewModel) {
-    var tab by rememberSaveable { mutableStateOf(Tab.Home) }
+private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
+    val ctx = LocalContext.current
+    var dest by rememberSaveable { mutableStateOf(Dest.Home) }
     var editing by remember { mutableStateOf<Txn?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var budgetEdit by remember { mutableStateOf<BudgetEdit.Of?>(null) }
     val snack = remember { SnackbarHostState() }
     val s = vm.state
 
@@ -166,48 +130,80 @@ private fun MainScaffold(vm: AppViewModel) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(tab.label, fontWeight = FontWeight.SemiBold) },
-                actions = {
-                    IconButton(onClick = { vm.importSms(firstTime = false) }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Rescan SMS")
-                    }
+                title = {
+                    Text(
+                        if (dest == Dest.Home) "Expense Tracker" else dest.label,
+                        style = MaterialTheme.typography.titleLarge,
+                    )
                 },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
         bottomBar = {
-            NavigationBar {
-                Tab.entries.forEach { t ->
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest) {
+                Dest.entries.forEach { d ->
                     NavigationBarItem(
-                        selected = tab == t,
-                        onClick = { tab = t },
-                        icon = { Text(t.emoji, fontSize = 20.sp) },
-                        label = { Text(t.label) },
+                        selected = dest == d,
+                        onClick = { dest = d },
+                        icon = { Icon(if (dest == d) d.selected else d.icon, contentDescription = d.label) },
+                        label = { Text(d.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        ),
                     )
                 }
             }
         },
         floatingActionButton = {
-            if (tab != Tab.Budget) {
-                FloatingActionButton(onClick = { adding = true }) { Icon(Icons.Default.Add, contentDescription = "Add") }
+            if (dest == Dest.Home || dest == Dest.Txns) {
+                ExtendedFloatingActionButton(
+                    onClick = { adding = true },
+                    icon = { Icon(Icons.Rounded.Add, null) },
+                    text = { Text("Add") },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                )
             }
         },
         snackbarHost = { SnackbarHost(snack) },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            MonthSelector(s.month, vm::prevMonth, vm::nextMonth)
             if (s.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            when (tab) {
-                Tab.Home -> HomeScreen(s, onTxn = { editing = it }, onSeeAll = { tab = Tab.Txns })
-                Tab.Txns -> TxnsScreen(s, onTxn = { editing = it })
-                Tab.Budget -> BudgetScreen(s, vm::setBudget)
+            if (dest != Dest.Settings) MonthSwitcher(s.month, vm::prevMonth, vm::nextMonth)
+            when (dest) {
+                Dest.Home -> HomeScreen(
+                    s,
+                    onTxn = { editing = it },
+                    onSeeAll = { dest = Dest.Txns },
+                    onOpenBudgets = { dest = Dest.Budget },
+                )
+                Dest.Txns -> TransactionsScreen(s, onTxn = { editing = it })
+                Dest.Budget -> BudgetScreen(s, onEdit = { budgetEdit = BudgetEdit.Of(it) })
+                Dest.Settings -> SettingsScreen(
+                    onRescan = { vm.importSms(firstTime = false) },
+                    onExport = {
+                        vm.exportCsv { uri ->
+                            if (uri == null) return@exportCsv
+                            val send = Intent(Intent.ACTION_SEND)
+                                .setType("text/csv")
+                                .putExtra(Intent.EXTRA_STREAM, uri)
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            ctx.startActivity(Intent.createChooser(send, "Export expenses").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    },
+                    onClearAll = vm::clearAll,
+                    onPrivacy = onPrivacy,
+                )
             }
         }
     }
 
     editing?.let { t ->
-        EditTxnDialog(
+        EditTxnSheet(
             txn = t,
             onDismiss = { editing = null },
             onSave = { nt, applyAll -> vm.updateTxn(nt, applyAll); editing = null },
@@ -215,6 +211,16 @@ private fun MainScaffold(vm: AppViewModel) {
         )
     }
     if (adding) {
-        AddTxnDialog(onDismiss = { adding = false }, onSave = { vm.addManual(it); adding = false })
+        AddTxnSheet(onDismiss = { adding = false }, onSave = { vm.addManual(it); adding = false })
+    }
+    budgetEdit?.let { b ->
+        BudgetSheet(
+            category = b.category,
+            current = b.category?.let { s.budgets[it] },
+            spent = s.byCategory,
+            existing = s.budgets.keys - Categories.TOTAL,
+            onDismiss = { budgetEdit = null },
+            onSave = { c, amt -> vm.setBudget(c, amt); budgetEdit = null },
+        )
     }
 }

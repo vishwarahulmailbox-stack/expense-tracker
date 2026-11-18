@@ -10,7 +10,12 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.net.Uri
+import androidx.core.content.FileProvider
+import java.io.File
+import java.time.LocalDate
 import java.time.YearMonth
+import java.util.Locale
 
 data class UiState(
     val month: YearMonth = YearMonth.now(),
@@ -98,4 +103,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun addManual(t: Txn) = io { db.insert(t) }
 
     fun setBudget(category: String, amount: Double) = io { db.setBudget(category, amount) }
+
+    fun clearAll() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { db.clearAll() }
+            prefs.edit().putBoolean("imported", false).apply()
+            state = state.copy(message = "All data cleared")
+            DataBus.bump()
+        }
+    }
+
+    /** Writes all transactions to a CSV in the cache folder and returns a shareable Uri. */
+    fun exportCsv(onReady: (Uri?) -> Unit) {
+        viewModelScope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                runCatching {
+                    val app = getApplication<Application>()
+                    val dir = File(app.cacheDir, "exports").apply { mkdirs() }
+                    val file = File(dir, "expenses-${LocalDate.now()}.csv")
+                    file.bufferedWriter().use { w ->
+                        w.write("Date,Type,Amount,Merchant,Category,Account,Note,Excluded\n")
+                        db.allTxns().forEach { t ->
+                            val cells = listOf(
+                                toLocalDate(t.timestamp).toString(),
+                                if (t.isDebit) "Expense" else "Income",
+                                "%.2f".format(Locale.US, t.amount),
+                                t.merchant, t.category, t.account ?: "", t.note,
+                                if (t.ignored) "Yes" else "No",
+                            )
+                            w.write(cells.joinToString(",") { "\"" + it.replace("\"", "\"\"") + "\"" } + "\n")
+                        }
+                    }
+                    FileProvider.getUriForFile(app, app.packageName + ".files", file)
+                }.getOrNull()
+            }
+            onReady(uri)
+        }
+    }
 }

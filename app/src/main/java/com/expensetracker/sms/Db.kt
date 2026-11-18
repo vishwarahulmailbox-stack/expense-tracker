@@ -103,6 +103,17 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         }
     }
 
+    fun allTxns(): List<Txn> =
+        readableDatabase.rawQuery("SELECT * FROM txns ORDER BY ts DESC", null).use { c ->
+            buildList { while (c.moveToNext()) add(c.toTxn()) }
+        }
+
+    fun clearAll() {
+        writableDatabase.delete("txns", null, null)
+        writableDatabase.delete("budgets", null, null)
+        writableDatabase.delete("rules", null, null)
+    }
+
     fun budgets(): Map<String, Double> =
         readableDatabase.rawQuery("SELECT category, amount FROM budgets", null).use { c ->
             buildMap { while (c.moveToNext()) put(c.getString(0), c.getDouble(1)) }

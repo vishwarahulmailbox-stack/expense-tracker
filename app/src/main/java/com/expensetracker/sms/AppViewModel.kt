@@ -21,6 +21,7 @@ data class UiState(
     val month: YearMonth = YearMonth.now(),
     val txns: List<Txn> = emptyList(),
     val budgets: Map<String, Double> = emptyMap(),
+    val accounts: List<Account> = emptyList(),
     val busy: Boolean = false,
     val message: String? = null,
 ) {
@@ -59,9 +60,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun reload() {
         val m = state.month
         viewModelScope.launch {
-            val (t, b, c) = withContext(Dispatchers.IO) { Triple(db.txnsInMonth(m), db.budgets(), db.categories()) }
-            Categories.set(c)
-            if (state.month == m) state = state.copy(txns = t, budgets = b)
+            val data = withContext(Dispatchers.IO) {
+                listOf(db.txnsInMonth(m), db.budgets(), db.categories(), db.accounts(m))
+            }
+            @Suppress("UNCHECKED_CAST")
+            Categories.set(data[2] as List<CategoryDef>)
+            @Suppress("UNCHECKED_CAST")
+            if (state.month == m) {
+                state = state.copy(
+                    txns = data[0] as List<Txn>,
+                    budgets = data[1] as Map<String, Double>,
+                    accounts = data[3] as List<Account>,
+                )
+            }
         }
     }
 
@@ -117,7 +128,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         io {
             db.update(t)
-            if (applyToMerchant) db.setRule(t.merchant, t.category)
+            // Learn only when the category actually changed, so a note edit doesn't lock a merchant.
+            if (applyToMerchant && before?.category != t.category) db.setRule(t.merchant, t.category)
         }
     }
 
@@ -128,6 +140,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteCategory(def: CategoryDef) = io { db.deleteCategory(def) }
+
+    fun renameAccount(key: String, nickname: String?) = io { db.setNickname(key, nickname) }
 
     fun saveMyNames(text: String) {
         SelfTransfer.setNames(getApplication(), text)

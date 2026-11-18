@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CreditCard
+import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Receipt
 import androidx.compose.material.icons.outlined.Savings
@@ -108,6 +110,7 @@ fun App(vm: AppViewModel = viewModel()) {
 enum class Dest(val label: String, val icon: ImageVector, val selected: ImageVector) {
     Home("Home", Icons.Outlined.Home, Icons.Rounded.Home),
     Txns("Transactions", Icons.Outlined.Receipt, Icons.Rounded.Receipt),
+    Accounts("Accounts", Icons.Outlined.CreditCard, Icons.Rounded.CreditCard),
     Budget("Budgets", Icons.Outlined.Savings, Icons.Rounded.Savings),
     Settings("Settings", Icons.Outlined.Settings, Icons.Rounded.Settings),
 }
@@ -124,7 +127,10 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
     var adding by remember { mutableStateOf(false) }
     var budgetEdit by remember { mutableStateOf<BudgetEdit.Of?>(null) }
     var showCategories by rememberSaveable { mutableStateOf(false) }
-    BackHandler(enabled = showCategories) { showCategories = false }
+    var selectedAccount by rememberSaveable { mutableStateOf<String?>(null) }
+    val inSubScreen = (dest == Dest.Settings && showCategories) || (dest == Dest.Accounts && selectedAccount != null)
+    val closeSubScreen = { showCategories = false; selectedAccount = null }
+    BackHandler(enabled = inSubScreen) { closeSubScreen() }
     val snack = remember { SnackbarHostState() }
     val s = vm.state
 
@@ -140,14 +146,16 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    if (dest == Dest.Settings && showCategories) {
-                        IconButton(onClick = { showCategories = false }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                    if (inSubScreen) {
+                        IconButton(onClick = closeSubScreen) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
                     }
                 },
                 title = {
                     Text(
                         when {
                             dest == Dest.Settings && showCategories -> "Categories"
+                            dest == Dest.Accounts && selectedAccount != null ->
+                                s.accounts.firstOrNull { it.key == selectedAccount }?.let { it.nickname ?: it.bank } ?: "Account"
                             dest == Dest.Home -> "Overview"
                             else -> dest.label
                         },
@@ -167,9 +175,10 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                 Dest.entries.forEach { d ->
                     NavigationBarItem(
                         selected = dest == d,
-                        onClick = { dest = d; showCategories = false },
+                        onClick = { dest = d; closeSubScreen() },
+                        alwaysShowLabel = true,
                         icon = { Icon(if (dest == d) d.selected else d.icon, contentDescription = d.label) },
-                        label = { Text(d.label) },
+                        label = { Text(d.label, maxLines = 1, style = MaterialTheme.typography.labelSmall) },
                         colors = NavigationBarItemDefaults.colors(
                             indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                             selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -201,6 +210,13 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                     onOpenBudgets = { dest = Dest.Budget },
                 )
                 Dest.Txns -> TransactionsScreen(s, onTxn = { editing = it })
+                Dest.Accounts -> AccountsScreen(
+                    s,
+                    selectedKey = selectedAccount,
+                    onSelect = { selectedAccount = it },
+                    onTxn = { editing = it },
+                    onRename = vm::renameAccount,
+                )
                 Dest.Budget -> BudgetScreen(s, onEdit = { budgetEdit = BudgetEdit.Of(it) })
                 Dest.Settings -> if (showCategories) {
                     CategoriesScreen(onSave = vm::saveCategory, onDelete = vm::deleteCategory)

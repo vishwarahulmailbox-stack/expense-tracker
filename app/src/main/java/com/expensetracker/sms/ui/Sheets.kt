@@ -209,7 +209,7 @@ fun TxnEditorContent(
     var category by remember { mutableStateOf(txn.category) }
     var note by remember { mutableStateOf(txn.note) }
     var ignored by remember { mutableStateOf(txn.ignored) }
-    var applyRule by remember { mutableStateOf(false) }
+    var applyRule by remember { mutableStateOf(txn.smsKey != null) }
     var showSms by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 

@@ -5,7 +5,13 @@ data class ParsedTxn(
     val isDebit: Boolean,
     val merchant: String,
     val account: String?,
+    val bank: String? = null,
+    val acctType: AcctType? = null,
+    /** Bank balance, or available limit for credit cards, if the SMS mentions it. */
+    val balance: Double? = null,
 )
+
+data class AccountInfo(val bank: String, val type: AcctType?, val balance: Double?)
 
 /**
  * Turns an Indian bank / UPI / card SMS into a transaction.
@@ -87,7 +93,42 @@ object SmsParser {
 
         val merchant = if (isDebit && atmRx.containsMatchIn(text)) "ATM Withdrawal"
         else findMerchant(text, isDebit) ?: senderName(sender)
-        return ParsedTxn(amount, isDebit, merchant, findAccount(text))
+        val account = findAccount(text)
+        val info = accountInfo(sender, text, account)
+        return ParsedTxn(amount, isDebit, merchant, account, info.bank, info.type, info.balance)
+    }
+
+    private val creditCardRx = Regex("""\b(credit card|creditcard|cc\b|avl\.?\s*lmt|avl\.?\s*limit|available (?:credit )?limit|credit limit)""", IC)
+    private val debitCardRx = Regex("""\b(debit card|atm card|dc\b|rupay debit)""", IC)
+    private val walletRx = Regex("""\b(wallet|paytm balance|amazon pay balance)\b""", IC)
+    private val bankAcctRx = Regex("""\b(a/c|acct|account|\bac)\b""", IC)
+    private val cardWordRx = Regex("""\bcard\b""", IC)
+    private const val NUM = """(?:rs\.?|inr|₹)?\s*([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)"""
+    private val balanceRx = Regex(
+        """(?:avl\.?\s*bal(?:ance)?|available\s+bal(?:ance)?|a/c\s+bal(?:ance)?|clear\s+bal(?:ance)?|\bbal(?:ance)?)\s*(?:is|:|-|=)?\s*$NUM""",
+        IC,
+    )
+    private val limitRx = Regex(
+        """(?:avl\.?\s*lmt|avl\.?\s*limit|available\s+(?:credit\s+)?limit|avail\.?\s*limit)\s*(?:is|:|-|=)?\s*$NUM""",
+        IC,
+    )
+
+    /** Bank name, account kind and balance/limit. Also used to back-fill old data. */
+    fun accountInfo(sender: String, body: String, account: String?): AccountInfo {
+        val bank = Banks.identify(sender, body)
+        val isCard = cardWordRx.containsMatchIn(body)
+        val type = when {
+            bank.name.contains("Card", true) || bank.name in setOf("OneCard", "slice", "American Express") -> AcctType.CREDIT_CARD
+            creditCardRx.containsMatchIn(body) -> AcctType.CREDIT_CARD
+            debitCardRx.containsMatchIn(body) -> AcctType.DEBIT_CARD
+            walletRx.containsMatchIn(body) -> AcctType.WALLET
+            isCard && !bankAcctRx.containsMatchIn(body) -> AcctType.CREDIT_CARD
+            account != null -> AcctType.BANK
+            else -> null
+        }
+        val balRx = if (type == AcctType.CREDIT_CARD) limitRx else balanceRx
+        val balance = balRx.find(body)?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
+        return AccountInfo(bank.name, type, balance)
     }
 
     private fun findAmount(text: String): Double? {
@@ -116,10 +157,18 @@ object SmsParser {
         return null
     }
 
+    private val channelPrefixRx = Regex("""^(?:upi|pos|ecom|imps|neft|mmt|vps|vin|ach|nach)[\s/\-*:]+""", IC)
+    private val gatewayPrefixRx = Regex(
+        """^(?:paytm|razorpay|raz|rzp|pyu|payu|ccavenue|cca|bharatpe|phonepe|gpay|bdsk|billdesk|cashfree|easebuzz|juspay|pinelabs|ezetap)\s*[*\-#]\s*""",
+        IC,
+    )
+
     private fun clean(raw: String): String? {
         var s = raw.trim().trimEnd('.', '-', '*', ' ', '/').replace(Regex("\\s+"), " ")
         val wasVpa = s.contains('@')
         if (wasVpa) s = s.substringBefore('@').trim()
+        // Payment-gateway prefixes: "PAYTM*SWIGGY", "RAZ*ZOMATO", "UPI-UBER", "POS AMAZON"
+        s = s.replace(gatewayPrefixRx, "").replace(channelPrefixRx, "").trim()
         if (s.length < 2) return null
         val low = s.lowercase()
         if (badStarts.any { low == it || low.startsWith("$it ") || low.startsWith("$it/") }) return null

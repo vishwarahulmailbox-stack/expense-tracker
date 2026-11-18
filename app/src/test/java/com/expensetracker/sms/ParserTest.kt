@@ -86,4 +86,78 @@ class ParserTest {
     @Test fun parsedNotNullForCommonFormats() {
         assertNotNull(parse("Dear Customer, Rs.649.00 has been debited from your account XX4321 towards NETFLIX on 03-01-25. -IDFC FIRST", "VM-IDFCFB"))
     }
+
+    // ------------------------------------------------------------ accounts
+
+    @Test fun bankAccountWithBalance() {
+        val p = parse("Rs.500.00 debited from A/c XX1234 on 12-11-26 to VPA swiggy@icici. Avl Bal Rs.12,345.67 -HDFC Bank")!!
+        assertEquals("HDFC Bank", p.bank)
+        assertEquals(AcctType.BANK, p.acctType)
+        assertEquals(12345.67, p.balance!!, 0.001)
+    }
+
+    @Test fun creditCardWithLimit() {
+        val p = parse("Rs.2,999.00 spent on ICICI Bank Credit Card XX4321 at AMAZON on 12-Nov-26. Avl Lmt: Rs.86,500.00", "JD-ICICIT")!!
+        assertEquals("ICICI Bank", p.bank)
+        assertEquals(AcctType.CREDIT_CARD, p.acctType)
+        assertEquals(86500.0, p.balance!!, 0.001)
+    }
+
+    @Test fun debitCard() {
+        val p = parse("Rs 750 spent on your SBI Debit Card ending 5678 at BIG BAZAAR on 12Nov26", "BZ-SBIINB")!!
+        assertEquals("SBI", p.bank)
+        assertEquals(AcctType.DEBIT_CARD, p.acctType)
+    }
+
+    @Test fun gatewayPrefixRemoved() {
+        val p = parse("Rs.249.00 spent on HDFC Bank Card x4321 at PAYTM*ZOMATO on 2026-11-12. Avl Lmt: Rs.45,000")!!
+        assertEquals("Zomato", p.merchant)
+    }
+
+    // --------------------------------------------------------- categories
+
+    private fun cat(merchant: String, body: String = "Sent Rs.100 via UPI") = Categorizer.categorize(merchant, body, true, null)
+
+    @Test fun brands() {
+        assertEquals("Travel", cat("Uber India"))
+        assertEquals("Travel", cat("Olacabs"))
+        assertEquals("Travel", cat("Rapido"))
+        assertEquals("Travel", cat("IRCTC"))
+        assertEquals("Food", cat("Zomato Ltd"))
+        assertEquals("Food", cat("Bundl Technologies"))
+        assertEquals("Groceries", cat("Swiggy Instamart"))
+        assertEquals("Groceries", cat("Zepto"))
+        assertEquals("Shopping", cat("Myntra"))
+        assertEquals("Entertainment", cat("Amazon Prime"))
+        assertEquals("Fuel", cat("HPCL"))
+        assertEquals("Bills", cat("Airtel"))
+        assertEquals("Bills", cat("BESCOM"))
+        assertEquals("Investment", cat("Zerodha Broking"))
+        assertEquals("Insurance", cat("LIC of India"))
+        assertEquals("Health", cat("Apollo Pharmacy"))
+        assertEquals("Personal care", cat("Urban Company"))
+        assertEquals("EMI/Loan", cat("Bajaj Finance"))
+        assertEquals(Categories.SELF, cat("CRED Club"))
+    }
+
+    @Test fun shopTypes() {
+        assertEquals("Health", cat("Shree Ganesh Medical"))
+        assertEquals("Groceries", cat("Balaji Kirana Store"))
+        assertEquals("Food", cat("Hotel Sagar Navi Mumbai"))
+        assertEquals("Shopping", cat("Mobile Mart"))
+        assertEquals("Fuel", cat("Om Sai Petroleum"))
+        assertEquals("Personal care", cat("Style Unisex Salon"))
+    }
+
+    @Test fun bodyClues() {
+        assertEquals("Investment", cat("BSE", "Rs 5000 debited via NACH for SIP"))
+        assertEquals("EMI/Loan", cat("ACH", "Rs 12000 debited by NACH towards loan account"))
+        assertEquals("Travel", cat("NETC", "Rs 85 debited for FASTag toll"))
+    }
+
+    @Test fun personToPerson() {
+        assertEquals("Transfers", cat("Rahul Sharma", "Sent Rs.500 to RAHUL SHARMA via UPI"))
+        assertEquals("Transfers", cat("x", "Sent Rs.500 to 9876543210@ybl"))
+        assertEquals(Categories.OTHERS, cat("Sharma Enterprises", "Sent Rs.500 via UPI"))
+    }
 }

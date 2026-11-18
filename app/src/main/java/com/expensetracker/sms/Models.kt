@@ -23,6 +23,28 @@ data class Txn(
     val body: String,
     val note: String = "",
     val ignored: Boolean = false,
+    val bank: String? = null,
+    val acctType: AcctType? = null,
+    val balance: Double? = null,
+) {
+    /** Groups transactions of the same account / card. */
+    val accountKey: String? get() = account?.let { "${bank ?: "Account"}|$it" }
+}
+
+/** One bank account or card, as shown on the Accounts tab. */
+data class Account(
+    val key: String,
+    val bank: String,
+    val last4: String,
+    val type: AcctType,
+    val nickname: String?,
+    val balance: Double?,
+    val balanceTs: Long?,
+    val monthSpent: Double,
+    val monthReceived: Double,
+    val monthCount: Int,
+    val totalCount: Int,
+    val lastTs: Long,
 )
 
 enum class CatType { EXPENSE, INCOME, NEUTRAL }
@@ -61,6 +83,10 @@ object Categories {
         e("Investment", "trending", 0xFF10B981, 120),
         e("Transfers", "swap", 0xFF0EA5E9, 130),
         e("ATM/Cash", "atm", 0xFF84CC16, 140),
+        e("Insurance", "shield", 0xFF0D9488, 150),
+        e("Personal care", "spa", 0xFFD946EF, 160),
+        e("Charges & fees", "fees", 0xFF78716C, 170),
+        e("Gifts & donations", "gift", 0xFFF43F5E, 180),
         e(OTHERS, "category", 0xFF94A3B8, 999),
         i("Salary", "work", 0xFF16A34A, 10),
         i("Rent received", "home_work", 0xFF7C3AED, 20),

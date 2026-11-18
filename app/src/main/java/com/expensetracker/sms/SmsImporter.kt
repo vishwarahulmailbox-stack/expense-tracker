@@ -35,6 +35,9 @@ object SmsImporter {
             category = category,
             timestamp = ts,
             body = body,
+            bank = p.bank,
+            acctType = p.acctType,
+            balance = p.balance,
         )
         if (category == Categories.SELF || SelfTransfer.byContent(t.merchant, body, t.account, names, known)) {
             t = SelfTransfer.mark(t)

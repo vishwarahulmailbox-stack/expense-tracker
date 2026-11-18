@@ -16,7 +16,7 @@ object DataBus {
     fun bump() = version.update { it + 1 }
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 2) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 3) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -51,10 +51,50 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         db.execSQL("CREATE TABLE budgets(category TEXT PRIMARY KEY, amount REAL NOT NULL)")
         db.execSQL("CREATE TABLE rules(merchant TEXT PRIMARY KEY, category TEXT NOT NULL)")
         upgradeToV2(db)
+        upgradeToV3(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) upgradeToV2(db)
+        if (oldVersion < 3) upgradeToV3(db)
+    }
+
+    /** v3: bank / account type / balance per transaction, account nicknames, smarter categories. */
+    private fun upgradeToV3(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE txns ADD COLUMN bank TEXT")
+        db.execSQL("ALTER TABLE txns ADD COLUMN acct_type TEXT")
+        db.execSQL("ALTER TABLE txns ADD COLUMN balance REAL")
+        db.execSQL("CREATE TABLE IF NOT EXISTS accounts(key TEXT PRIMARY KEY, nickname TEXT)")
+        Categories.builtins.forEach { db.insertWithOnConflict("categories", null, it.toCv(), SQLiteDatabase.CONFLICT_IGNORE) }
+
+        val rules = HashMap<String, String>()
+        db.rawQuery("SELECT merchant, category FROM rules", null).use { c -> while (c.moveToNext()) rules[c.getString(0)] = c.getString(1) }
+        val redo = setOf(Categories.OTHERS, "Transfers", Categories.OTHER_INCOME)
+
+        db.rawQuery("SELECT id, sms_key, body, account, merchant, category, is_debit FROM txns", null).use { c ->
+            while (c.moveToNext()) {
+                val key = c.getString(1) ?: continue // manual entries
+                val sender = key.substringBefore('|')
+                val body = c.getString(2)
+                val info = SmsParser.accountInfo(sender, body, c.getString(3))
+                val cv = ContentValues().apply {
+                    put("bank", info.bank)
+                    put("acct_type", info.type?.name)
+                    put("balance", info.balance)
+                }
+                // Give "Others" & co. a second chance with the smarter categoriser.
+                val merchant = c.getString(4)
+                val category = c.getString(5)
+                if (category in redo && rules[merchant.lowercase()] == null) {
+                    val better = Categorizer.categorize(merchant, body, c.getInt(6) == 1, null)
+                    if (better != category) {
+                        cv.put("category", better)
+                        if (better == Categories.SELF) cv.put("ignored", 1)
+                    }
+                }
+                db.update("txns", cv, "id=?", arrayOf(c.getLong(0).toString()))
+            }
+        }
     }
 
     /** v2: categories table (built-in + custom) and income categories. */
@@ -147,6 +187,42 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
             buildList { while (c.moveToNext()) add(c.toTxn()) }
         }
 
+    fun nicknames(): Map<String, String> =
+        readableDatabase.rawQuery("SELECT key, nickname FROM accounts WHERE nickname IS NOT NULL", null).use { c ->
+            buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1)) }
+        }
+
+    fun setNickname(key: String, nickname: String?) {
+        val cv = ContentValues().apply { put("key", key); put("nickname", nickname?.trim()?.ifBlank { null }) }
+        writableDatabase.insertWithOnConflict("accounts", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** Every account / card seen in SMS, with this month's activity and the latest known balance. */
+    fun accounts(ym: YearMonth): List<Account> {
+        val (start, end) = monthRange(ym)
+        val names = nicknames()
+        return allTxns().filter { it.accountKey != null }.groupBy { it.accountKey!! }.map { (key, list) ->
+            val latest = list.maxBy { it.timestamp }
+            val withBal = list.filter { it.balance != null }.maxByOrNull { it.timestamp }
+            val type = list.mapNotNull { it.acctType }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: AcctType.BANK
+            val month = list.filter { it.timestamp in start until end && !it.ignored }
+            Account(
+                key = key,
+                bank = latest.bank ?: "Account",
+                last4 = latest.account!!,
+                type = type,
+                nickname = names[key],
+                balance = withBal?.balance,
+                balanceTs = withBal?.timestamp,
+                monthSpent = month.filter { it.isDebit }.sumOf { it.amount },
+                monthReceived = month.filter { !it.isDebit }.sumOf { it.amount },
+                monthCount = list.count { it.timestamp in start until end },
+                totalCount = list.size,
+                lastTs = latest.timestamp,
+            )
+        }.sortedWith(compareBy<Account>({ it.type.ordinal }, { -it.lastTs }))
+    }
+
     /** Last digits of every account / card seen in your SMS. */
     fun knownAccounts(): Set<String> =
         readableDatabase.rawQuery("SELECT DISTINCT account FROM txns WHERE account IS NOT NULL", null).use { c ->
@@ -164,6 +240,9 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         put("body", body)
         put("note", note)
         put("ignored", if (ignored) 1 else 0)
+        put("bank", bank)
+        put("acct_type", acctType?.name)
+        put("balance", balance)
     }
 
     private fun Cursor.toTxn() = Txn(
@@ -178,6 +257,9 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         body = getString(getColumnIndexOrThrow("body")),
         note = getString(getColumnIndexOrThrow("note")),
         ignored = getInt(getColumnIndexOrThrow("ignored")) == 1,
+        bank = getString(getColumnIndexOrThrow("bank")),
+        acctType = getString(getColumnIndexOrThrow("acct_type"))?.let { n -> AcctType.entries.firstOrNull { it.name == n } },
+        balance = getColumnIndexOrThrow("balance").let { if (isNull(it)) null else getDouble(it) },
     )
 
     /** Returns -1 if this SMS was already saved. */
@@ -211,6 +293,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         writableDatabase.delete("txns", null, null)
         writableDatabase.delete("budgets", null, null)
         writableDatabase.delete("rules", null, null)
+        writableDatabase.delete("accounts", null, null)
     }
 
     fun budgets(): Map<String, Double> =

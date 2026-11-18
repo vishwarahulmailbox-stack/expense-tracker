@@ -110,6 +110,8 @@ fun CategoryGrid(selected: String?, options: List<String>, onPick: (String) -> U
                         Text(
                             c,
                             style = MaterialTheme.typography.labelSmall,
+                            fontSize = if (c.length > 11) 10.sp else MaterialTheme.typography.labelSmall.fontSize,
+                            letterSpacing = if (c.length > 11) 0.sp else MaterialTheme.typography.labelSmall.letterSpacing,
                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

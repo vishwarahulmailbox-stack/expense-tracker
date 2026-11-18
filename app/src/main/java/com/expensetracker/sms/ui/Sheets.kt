@@ -61,7 +61,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.rounded.Add
+import com.expensetracker.sms.CatType
 import com.expensetracker.sms.Categories
+import com.expensetracker.sms.CategoryDef
 import com.expensetracker.sms.Txn
 import com.expensetracker.sms.fmt
 import java.time.Instant
@@ -85,11 +89,16 @@ private fun Sheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
 
 /** 4-column grid of category tiles. */
 @Composable
-fun CategoryGrid(selected: String?, options: List<String>, onPick: (String) -> Unit) {
+fun CategoryGrid(selected: String?, options: List<String>, onAddNew: (() -> Unit)? = null, onPick: (String) -> Unit) {
+    val items = if (onAddNew != null) options + NEW_TILE else options
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.chunked(4).forEach { row ->
+        items.chunked(4).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { c ->
+                    if (c == NEW_TILE) {
+                        NewTile(Modifier.weight(1f)) { onAddNew?.invoke() }
+                        return@forEach
+                    }
                     val isSel = c == selected
                     val color = Categories.color(c)
                     Column(
@@ -125,6 +134,27 @@ fun CategoryGrid(selected: String?, options: List<String>, onPick: (String) -> U
     }
 }
 
+private const val NEW_TILE = "\u0000new"
+
+@Composable
+private fun NewTile(modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)) }
+        Spacer(Modifier.height(6.dp))
+        Text("New", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+    }
+}
+
 @Composable
 private fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(
@@ -157,12 +187,24 @@ private val fullFmt = DateTimeFormatter.ofPattern("EEE, d MMM yyyy · h:mm a", L
 // --------------------------------------------------------------- Edit
 
 @Composable
-fun EditTxnSheet(txn: Txn, onDismiss: () -> Unit, onSave: (Txn, Boolean) -> Unit, onDelete: () -> Unit) {
-    Sheet(onDismiss) { TxnEditorContent(txn, onSave, onDelete) }
+fun EditTxnSheet(
+    txn: Txn,
+    onDismiss: () -> Unit,
+    onSave: (Txn, Boolean) -> Unit,
+    onDelete: () -> Unit,
+    onCreateCategory: (CategoryDef) -> Unit,
+) {
+    Sheet(onDismiss) { TxnEditorContent(txn, onSave, onDelete, onCreateCategory) }
 }
 
 @Composable
-fun TxnEditorContent(txn: Txn, onSave: (Txn, Boolean) -> Unit, onDelete: () -> Unit) {
+fun TxnEditorContent(
+    txn: Txn,
+    onSave: (Txn, Boolean) -> Unit,
+    onDelete: () -> Unit,
+    onCreateCategory: (CategoryDef) -> Unit = {},
+) {
+    var creating by remember { mutableStateOf(false) }
     var merchant by remember { mutableStateOf(txn.merchant) }
     var category by remember { mutableStateOf(txn.category) }
     var note by remember { mutableStateOf(txn.note) }
@@ -208,7 +250,15 @@ fun TxnEditorContent(txn: Txn, onSave: (Txn, Boolean) -> Unit, onDelete: () -> U
         )
 
         Label("Category")
-        CategoryGrid(category, if (txn.isDebit) Categories.expense else Categories.all) { category = it }
+        CategoryGrid(category, Categories.forDirection(txn.isDebit), onAddNew = { creating = true }) { category = it }
+        if (category == Categories.SELF) {
+            Text(
+                "Money moved between your own accounts. Never counted as spending or income.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
         Spacer(Modifier.height(8.dp))
         SwitchRow(
             "Always use for “${merchant.trim().ifBlank { txn.merchant }}”",
@@ -225,7 +275,9 @@ fun TxnEditorContent(txn: Txn, onSave: (Txn, Boolean) -> Unit, onDelete: () -> U
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))
-        SwitchRow("Exclude from totals", "For self-transfers, refunds or duplicates", ignored) { ignored = it }
+        if (category != Categories.SELF) {
+            SwitchRow("Exclude from totals", "For refunds, duplicates or reimbursements", ignored) { ignored = it }
+        }
 
         if (txn.smsKey != null) {
             Row(
@@ -269,17 +321,26 @@ fun TxnEditorContent(txn: Txn, onSave: (Txn, Boolean) -> Unit, onDelete: () -> U
             ) { Text("Save changes") }
         }
     }
+    if (creating) {
+        CategoryEditorSheet(
+            existing = null,
+            presetType = if (txn.isDebit) CatType.EXPENSE else CatType.INCOME,
+            onDismiss = { creating = false },
+            onSave = { def, _ -> onCreateCategory(def); category = def.name; creating = false },
+        )
+    }
 }
 
 // --------------------------------------------------------------- Add
 
 @Composable
-fun AddTxnSheet(onDismiss: () -> Unit, onSave: (Txn) -> Unit) {
-    Sheet(onDismiss) { AddTxnContent(onSave) }
+fun AddTxnSheet(onDismiss: () -> Unit, onSave: (Txn) -> Unit, onCreateCategory: (CategoryDef) -> Unit) {
+    Sheet(onDismiss) { AddTxnContent(onSave, onCreateCategory) }
 }
 
 @Composable
-fun AddTxnContent(onSave: (Txn) -> Unit) {
+fun AddTxnContent(onSave: (Txn) -> Unit, onCreateCategory: (CategoryDef) -> Unit = {}) {
+    var creating by remember { mutableStateOf(false) }
     var isDebit by remember { mutableStateOf(true) }
     var amount by remember { mutableStateOf("") }
     var merchant by remember { mutableStateOf("") }
@@ -302,12 +363,12 @@ fun AddTxnContent(onSave: (Txn) -> Unit) {
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(
                 selected = isDebit,
-                onClick = { isDebit = true; if (category == Categories.INCOME) category = "Food" },
+                onClick = { isDebit = true; category = "Food" },
                 shape = SegmentedButtonDefaults.itemShape(0, 2),
             ) { Text("Expense") }
             SegmentedButton(
                 selected = !isDebit,
-                onClick = { isDebit = false; category = Categories.INCOME },
+                onClick = { isDebit = false; category = "Salary" },
                 shape = SegmentedButtonDefaults.itemShape(1, 2),
             ) { Text("Income") }
         }
@@ -341,10 +402,8 @@ fun AddTxnContent(onSave: (Txn) -> Unit) {
             },
             leadingIcon = { Icon(Icons.Rounded.CalendarToday, null, Modifier.size(18.dp)) },
         )
-        if (isDebit) {
-            Label("Category")
-            CategoryGrid(category, Categories.expense) { category = it }
-        }
+        Label("Category")
+        CategoryGrid(category, if (isDebit) Categories.expense else Categories.income, onAddNew = { creating = true }) { category = it }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = note,
@@ -375,6 +434,15 @@ fun AddTxnContent(onSave: (Txn) -> Unit) {
             },
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) { Text(if (isDebit) "Add expense" else "Add income") }
+    }
+
+    if (creating) {
+        CategoryEditorSheet(
+            existing = null,
+            presetType = if (isDebit) CatType.EXPENSE else CatType.INCOME,
+            onDismiss = { creating = false },
+            onSave = { def, _ -> onCreateCategory(def); category = def.name; creating = false },
+        )
     }
 
     if (pickDate) {

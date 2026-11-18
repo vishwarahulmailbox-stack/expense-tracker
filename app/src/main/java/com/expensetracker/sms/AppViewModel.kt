@@ -29,6 +29,9 @@ data class UiState(
     val income: Double get() = active.filter { !it.isDebit }.sumOf { it.amount }
     val byCategory: Map<String, Double>
         get() = active.filter { it.isDebit }.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
+    val incomeByCategory: Map<String, Double>
+        get() = active.filter { !it.isDebit }.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
+    val selfTransfers: List<Txn> get() = txns.filter { it.category == Categories.SELF }
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -38,14 +41,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var state by mutableStateOf(UiState())
         private set
 
+    var myNames by mutableStateOf(SelfTransfer.namesText(app))
+        private set
+
     init {
         viewModelScope.launch { DataBus.version.collect { reload() } }
+        // One-time pass after upgrading: find self transfers in already-saved data.
+        if (!prefs.getBoolean("self_scan_v2", false)) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { SelfTransfer.scanAll(app) }
+                prefs.edit().putBoolean("self_scan_v2", true).apply()
+                DataBus.bump()
+            }
+        }
     }
 
     private fun reload() {
         val m = state.month
         viewModelScope.launch {
-            val (t, b) = withContext(Dispatchers.IO) { db.txnsInMonth(m) to db.budgets() }
+            val (t, b, c) = withContext(Dispatchers.IO) { Triple(db.txnsInMonth(m), db.budgets(), db.categories()) }
+            Categories.set(c)
             if (state.month == m) state = state.copy(txns = t, budgets = b)
         }
     }
@@ -93,9 +108,39 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateTxn(t: Txn, applyToMerchant: Boolean) = io {
-        db.update(t)
-        if (applyToMerchant) db.setRule(t.merchant, t.category)
+    fun updateTxn(edited: Txn, applyToMerchant: Boolean) {
+        val before = state.txns.firstOrNull { it.id == edited.id }
+        val t = when {
+            edited.category == Categories.SELF -> edited.copy(ignored = true)
+            before != null && before.category == Categories.SELF && before.ignored == edited.ignored -> edited.copy(ignored = false)
+            else -> edited
+        }
+        io {
+            db.update(t)
+            if (applyToMerchant) db.setRule(t.merchant, t.category)
+        }
+    }
+
+    fun saveCategory(def: CategoryDef, oldName: String?) {
+        // Update the in-memory list right away so the new category can be picked immediately.
+        Categories.set(Categories.allDefs().filter { it.name != oldName && it.name != def.name } + def)
+        io { db.saveCategory(def, oldName) }
+    }
+
+    fun deleteCategory(def: CategoryDef) = io { db.deleteCategory(def) }
+
+    fun saveMyNames(text: String) {
+        SelfTransfer.setNames(getApplication(), text)
+        myNames = text.trim()
+        detectSelfTransfers()
+    }
+
+    fun detectSelfTransfers() {
+        viewModelScope.launch {
+            val n = withContext(Dispatchers.IO) { SelfTransfer.scanAll(getApplication()) }
+            state = state.copy(message = if (n > 0) "$n self transfers found and excluded" else "No new self transfers found")
+            DataBus.bump()
+        }
     }
 
     fun deleteTxn(t: Txn) = io { db.delete(t.id) }

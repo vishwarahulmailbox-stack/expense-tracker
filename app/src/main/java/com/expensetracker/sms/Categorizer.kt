@@ -46,14 +46,32 @@ object Categorizer {
         cat to Regex("\\b(" + kws.joinToString("|") { Regex.escape(it) } + ")", RegexOption.IGNORE_CASE)
     }
 
+    private val IC = setOf(RegexOption.IGNORE_CASE)
     private val phoneVpa = Regex("""\b\d{10}@""")
+    private val salaryRx = Regex("""\b(salary|sal|payroll|stipend)\b""", IC)
+    private val dividendRx = Regex("""\b(dividend|div)\b""", IC)
+    private val interestRx = Regex("""\b(interest|int\.?\s*(?:pd|paid|cr|credited|credit)|sb\s*int)\b""", IC)
+    private val refundRx = Regex("""\b(refund|refunded|cashback|cash back|reversal|reversed|chargeback)\b""", IC)
+    private val rentRx = Regex("""\b(rent|rental)\b""", IC)
 
     fun categorize(merchant: String, body: String, isDebit: Boolean, rule: String?): String {
         if (rule != null) return rule
-        if (!isDebit) return Categories.INCOME
+        if (!isDebit) return incomeCategory(merchant, body)
         regexes.firstOrNull { it.second.containsMatchIn(merchant) }?.let { return it.first }
         regexes.firstOrNull { it.second.containsMatchIn(body) }?.let { return it.first }
         if (phoneVpa.containsMatchIn(body) || merchant.all { it.isDigit() }) return "Transfers"
-        return "Others"
+        return Categories.OTHERS
+    }
+
+    fun incomeCategory(merchant: String, body: String): String {
+        val text = "$merchant $body"
+        return when {
+            salaryRx.containsMatchIn(text) -> "Salary"
+            dividendRx.containsMatchIn(text) -> "Dividend"
+            interestRx.containsMatchIn(text) -> "Interest"
+            refundRx.containsMatchIn(text) -> "Refund & cashback"
+            rentRx.containsMatchIn(text) -> "Rent received"
+            else -> Categories.OTHER_INCOME
+        }
     }
 }

@@ -1,6 +1,13 @@
 package com.expensetracker.sms.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -57,28 +64,40 @@ fun TransactionsScreen(s: UiState, onTxn: (Txn) -> Unit) {
     val received = list.filter { !it.isDebit && !it.ignored }.sumOf { it.amount }
 
     Column {
-        TextField(
-            value = query,
-            onValueChange = { query = it },
-            leadingIcon = { Icon(Icons.Rounded.Search, null) },
-            trailingIcon = {
-                if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, "Clear") }
-            },
-            placeholder = { Text("Search merchant, category or note") },
-            singleLine = true,
-            shape = CircleShape,
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-            ),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        )
+        // Compact search field (44dp instead of the 56dp Material default)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .height(44.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                .padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Search, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f)) {
+                if (query.isEmpty()) {
+                    Text("Search merchant, category, note", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { query = "" }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, "Clear", Modifier.size(18.dp)) }
+            }
+        }
 
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             val types = listOf("All", "Expenses", "Income")
             items(types.size) { i ->
@@ -94,14 +113,14 @@ fun TransactionsScreen(s: UiState, onTxn: (Txn) -> Unit) {
                     selected = category == c,
                     onClick = { category = if (category == c) null else c },
                     label = { Text(c) },
-                    leadingIcon = { Icon(categoryIcon(c), null, Modifier.padding(0.dp)) },
+                    leadingIcon = { Icon(categoryIcon(c), null, Modifier.size(16.dp)) },
                     colors = chipColors(),
                 )
             }
         }
 
         if (list.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)) {
                 Text(
                     "${list.size} transaction${if (list.size == 1) "" else "s"}",
                     style = MaterialTheme.typography.bodySmall,
@@ -123,14 +142,14 @@ fun TransactionsScreen(s: UiState, onTxn: (Txn) -> Unit) {
         }
 
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             list.groupBy { dayLabel(it.timestamp) }.forEach { (day, items) ->
                 item(key = "h-$day") {
                     val daySpent = items.filter { it.isDebit && !it.ignored }.sumOf { it.amount }
                     Row(
-                        Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 12.dp, bottom = 4.dp),
+                        Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 8.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(day, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
@@ -140,12 +159,10 @@ fun TransactionsScreen(s: UiState, onTxn: (Txn) -> Unit) {
                     }
                 }
                 item(key = "g-$day") {
-                    AppCard(padding = PaddingValues(vertical = 4.dp)) {
+                    AppCard(padding = PaddingValues(vertical = 2.dp)) {
                         items.forEachIndexed { i, t ->
                             TxnRow(t) { onTxn(t) }
-                            if (i < items.lastIndex) {
-                                HorizontalDivider(Modifier.padding(start = 72.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                            }
+                            if (i < items.lastIndex) RowDivider()
                         }
                     }
                 }

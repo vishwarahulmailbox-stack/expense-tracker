@@ -1,5 +1,8 @@
 package com.expensetracker.sms
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import java.text.NumberFormat
 import java.time.Instant
@@ -22,46 +25,71 @@ data class Txn(
     val ignored: Boolean = false,
 )
 
+enum class CatType { EXPENSE, INCOME, NEUTRAL }
+
+data class CategoryDef(
+    val name: String,
+    val type: CatType,
+    val icon: String,
+    val color: Long,
+    val builtin: Boolean,
+    val sort: Int,
+)
+
 object Categories {
-    const val INCOME = "Income"
     const val TOTAL = "__TOTAL__"
+    const val SELF = "Self transfer"
+    const val OTHERS = "Others"
+    const val OTHER_INCOME = "Other income"
+    const val LEGACY_INCOME = "Income"
 
-    val expense = listOf(
-        "Food", "Groceries", "Shopping", "Travel", "Fuel", "Bills", "Rent",
-        "Entertainment", "Health", "Education", "EMI/Loan", "Investment",
-        "Transfers", "ATM/Cash", "Others",
+    private fun e(name: String, icon: String, color: Long, sort: Int) = CategoryDef(name, CatType.EXPENSE, icon, color, true, sort)
+    private fun i(name: String, icon: String, color: Long, sort: Int) = CategoryDef(name, CatType.INCOME, icon, color, true, sort)
+
+    val builtins: List<CategoryDef> = listOf(
+        e("Food", "restaurant", 0xFFF97316, 10),
+        e("Groceries", "grocery", 0xFF22C55E, 20),
+        e("Shopping", "shopping", 0xFFEC4899, 30),
+        e("Travel", "car", 0xFF3B82F6, 40),
+        e("Fuel", "fuel", 0xFFB45309, 50),
+        e("Bills", "receipt", 0xFFEAB308, 60),
+        e("Rent", "home", 0xFF8B5CF6, 70),
+        e("Entertainment", "movie", 0xFFEF4444, 80),
+        e("Health", "hospital", 0xFF06B6D4, 90),
+        e("Education", "school", 0xFF6366F1, 100),
+        e("EMI/Loan", "bank", 0xFF64748B, 110),
+        e("Investment", "trending", 0xFF10B981, 120),
+        e("Transfers", "swap", 0xFF0EA5E9, 130),
+        e("ATM/Cash", "atm", 0xFF84CC16, 140),
+        e(OTHERS, "category", 0xFF94A3B8, 999),
+        i("Salary", "work", 0xFF16A34A, 10),
+        i("Rent received", "home_work", 0xFF7C3AED, 20),
+        i("Dividend", "pie", 0xFF0891B2, 30),
+        i("Interest", "savings", 0xFFCA8A04, 40),
+        i("Refund & cashback", "replay", 0xFFDB2777, 50),
+        i(OTHER_INCOME, "payments", 0xFF059669, 999),
+        CategoryDef(SELF, CatType.NEUTRAL, "sync", 0xFF64748B, true, 1000),
     )
-    val all = expense + INCOME
 
-    fun emoji(c: String): String = when (c) {
-        "Food" -> "🍔"
-        "Groceries" -> "🛒"
-        "Shopping" -> "🛍️"
-        "Travel" -> "🚕"
-        "Fuel" -> "⛽"
-        "Bills" -> "💡"
-        "Rent" -> "🏠"
-        "Entertainment" -> "🎬"
-        "Health" -> "💊"
-        "Education" -> "📚"
-        "EMI/Loan" -> "🏦"
-        "Investment" -> "📈"
-        "Transfers" -> "🔁"
-        "ATM/Cash" -> "💵"
-        INCOME -> "💰"
-        else -> "📦"
+    /** Live list (built-in + user-created). Compose state, so screens update when it changes. */
+    private var defs by mutableStateOf(builtins.associateBy { it.name })
+
+    fun set(list: List<CategoryDef>) {
+        if (list.isNotEmpty()) defs = list.associateBy { it.name }
     }
 
-    private val colors = mapOf(
-        "Food" to 0xFFF97316, "Groceries" to 0xFF22C55E, "Shopping" to 0xFFEC4899,
-        "Travel" to 0xFF3B82F6, "Fuel" to 0xFFB45309, "Bills" to 0xFFEAB308,
-        "Rent" to 0xFF8B5CF6, "Entertainment" to 0xFFEF4444, "Health" to 0xFF06B6D4,
-        "Education" to 0xFF6366F1, "EMI/Loan" to 0xFF64748B, "Investment" to 0xFF10B981,
-        "Transfers" to 0xFF0EA5E9, "ATM/Cash" to 0xFF84CC16, "Others" to 0xFF94A3B8,
-        INCOME to 0xFF16A34A,
-    )
+    fun def(name: String): CategoryDef? = defs[name]
+    fun allDefs(): List<CategoryDef> = defs.values.sortedWith(compareBy({ it.type.ordinal }, { it.sort }, { it.name }))
 
-    fun color(c: String): Color = Color(colors[c] ?: 0xFF94A3B8)
+    val expense: List<String> get() = allDefs().filter { it.type == CatType.EXPENSE }.map { it.name }
+    val income: List<String> get() = allDefs().filter { it.type == CatType.INCOME }.map { it.name }
+
+    /** Categories that fit a debit or a credit, plus Self transfer. */
+    fun forDirection(isDebit: Boolean): List<String> = (if (isDebit) expense else income) + SELF
+
+    fun color(c: String): Color = Color(defs[c]?.color ?: 0xFF94A3B8)
+    fun iconKey(c: String): String = defs[c]?.icon ?: if (c == LEGACY_INCOME) "payments" else "category"
+    fun fallbackFor(isDebit: Boolean) = if (isDebit) OTHERS else OTHER_INCOME
 }
 
 fun fmt(v: Double): String {

@@ -16,7 +16,7 @@ object DataBus {
     fun bump() = version.update { it + 1 }
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 1) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 2) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -50,9 +50,108 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         db.execSQL("CREATE INDEX idx_ts ON txns(ts)")
         db.execSQL("CREATE TABLE budgets(category TEXT PRIMARY KEY, amount REAL NOT NULL)")
         db.execSQL("CREATE TABLE rules(merchant TEXT PRIMARY KEY, category TEXT NOT NULL)")
+        upgradeToV2(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) upgradeToV2(db)
+    }
+
+    /** v2: categories table (built-in + custom) and income categories. */
+    private fun upgradeToV2(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS categories(
+                name TEXT PRIMARY KEY,
+                type INTEGER NOT NULL,
+                icon TEXT NOT NULL,
+                color INTEGER NOT NULL,
+                builtin INTEGER NOT NULL,
+                sort INTEGER NOT NULL)"""
+        )
+        Categories.builtins.forEach { db.insertWithOnConflict("categories", null, it.toCv(), SQLiteDatabase.CONFLICT_IGNORE) }
+        // Old single "Income" category -> specific income categories
+        db.rawQuery("SELECT id, merchant, body FROM txns WHERE category=?", arrayOf(Categories.LEGACY_INCOME)).use { c ->
+            while (c.moveToNext()) {
+                val cat = Categorizer.incomeCategory(c.getString(1), c.getString(2))
+                db.update("txns", ContentValues().apply { put("category", cat) }, "id=?", arrayOf(c.getLong(0).toString()))
+            }
+        }
+        db.update("rules", ContentValues().apply { put("category", Categories.OTHER_INCOME) }, "category=?", arrayOf(Categories.LEGACY_INCOME))
+    }
+
+    private fun CategoryDef.toCv() = ContentValues().apply {
+        put("name", name)
+        put("type", type.ordinal)
+        put("icon", icon)
+        put("color", color)
+        put("builtin", if (builtin) 1 else 0)
+        put("sort", sort)
+    }
+
+    fun categories(): List<CategoryDef> =
+        readableDatabase.rawQuery("SELECT name, type, icon, color, builtin, sort FROM categories", null).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        CategoryDef(
+                            name = c.getString(0),
+                            type = CatType.entries.getOrElse(c.getInt(1)) { CatType.EXPENSE },
+                            icon = c.getString(2),
+                            color = c.getLong(3),
+                            builtin = c.getInt(4) == 1,
+                            sort = c.getInt(5),
+                        )
+                    )
+                }
+            }
+        }
+
+    /** Insert or update a category. Renaming moves its transactions, budgets and rules along. */
+    fun saveCategory(def: CategoryDef, oldName: String?) {
+        val w = writableDatabase
+        w.beginTransaction()
+        try {
+            if (oldName != null && oldName != def.name) {
+                w.delete("categories", "name=?", arrayOf(oldName))
+                val cv = ContentValues().apply { put("category", def.name) }
+                w.update("txns", cv, "category=?", arrayOf(oldName))
+                w.update("budgets", cv, "category=?", arrayOf(oldName))
+                w.update("rules", cv, "category=?", arrayOf(oldName))
+            }
+            w.insertWithOnConflict("categories", null, def.toCv(), SQLiteDatabase.CONFLICT_REPLACE)
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
+    /** Deletes a custom category; its transactions go to Others / Other income. */
+    fun deleteCategory(def: CategoryDef) {
+        if (def.builtin) return
+        val w = writableDatabase
+        w.beginTransaction()
+        try {
+            w.delete("categories", "name=?", arrayOf(def.name))
+            w.update("txns", ContentValues().apply { put("category", Categories.OTHERS) }, "category=? AND is_debit=1", arrayOf(def.name))
+            w.update("txns", ContentValues().apply { put("category", Categories.OTHER_INCOME) }, "category=? AND is_debit=0", arrayOf(def.name))
+            w.delete("budgets", "category=?", arrayOf(def.name))
+            w.delete("rules", "category=?", arrayOf(def.name))
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
+    fun txnsBetween(start: Long, end: Long): List<Txn> =
+        readableDatabase.rawQuery("SELECT * FROM txns WHERE ts>=? AND ts<=?", arrayOf(start.toString(), end.toString())).use { c ->
+            buildList { while (c.moveToNext()) add(c.toTxn()) }
+        }
+
+    /** Last digits of every account / card seen in your SMS. */
+    fun knownAccounts(): Set<String> =
+        readableDatabase.rawQuery("SELECT DISTINCT account FROM txns WHERE account IS NOT NULL", null).use { c ->
+            buildSet { while (c.moveToNext()) add(c.getString(0).takeLast(4)) }
+        }
 
     private fun Txn.toCv() = ContentValues().apply {
         put("sms_key", smsKey)

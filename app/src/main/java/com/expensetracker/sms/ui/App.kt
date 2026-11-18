@@ -11,7 +11,11 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -119,6 +123,8 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
     var editing by remember { mutableStateOf<Txn?>(null) }
     var adding by remember { mutableStateOf(false) }
     var budgetEdit by remember { mutableStateOf<BudgetEdit.Of?>(null) }
+    var showCategories by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = showCategories) { showCategories = false }
     val snack = remember { SnackbarHostState() }
     val s = vm.state
 
@@ -133,11 +139,25 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
+                navigationIcon = {
+                    if (dest == Dest.Settings && showCategories) {
+                        IconButton(onClick = { showCategories = false }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                    }
+                },
                 title = {
                     Text(
-                        if (dest == Dest.Home) "Expense Tracker" else dest.label,
+                        when {
+                            dest == Dest.Settings && showCategories -> "Categories"
+                            dest == Dest.Home -> "Overview"
+                            else -> dest.label
+                        },
                         style = MaterialTheme.typography.titleLarge,
                     )
+                },
+                actions = {
+                    if (dest != Dest.Settings) {
+                        MonthPill(s.month, vm::prevMonth, vm::nextMonth, Modifier.padding(end = 8.dp))
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
@@ -147,7 +167,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                 Dest.entries.forEach { d ->
                     NavigationBarItem(
                         selected = dest == d,
-                        onClick = { dest = d },
+                        onClick = { dest = d; showCategories = false },
                         icon = { Icon(if (dest == d) d.selected else d.icon, contentDescription = d.label) },
                         label = { Text(d.label) },
                         colors = NavigationBarItemDefaults.colors(
@@ -173,7 +193,6 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             if (s.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (dest != Dest.Settings) MonthSwitcher(s.month, vm::prevMonth, vm::nextMonth)
             when (dest) {
                 Dest.Home -> HomeScreen(
                     s,
@@ -183,7 +202,9 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                 )
                 Dest.Txns -> TransactionsScreen(s, onTxn = { editing = it })
                 Dest.Budget -> BudgetScreen(s, onEdit = { budgetEdit = BudgetEdit.Of(it) })
-                Dest.Settings -> SettingsScreen(
+                Dest.Settings -> if (showCategories) {
+                    CategoriesScreen(onSave = vm::saveCategory, onDelete = vm::deleteCategory)
+                } else SettingsScreen(
                     onRescan = { vm.importSms(firstTime = false) },
                     onExport = {
                         vm.exportCsv { uri ->
@@ -197,6 +218,10 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                     },
                     onClearAll = vm::clearAll,
                     onPrivacy = onPrivacy,
+                    onOpenCategories = { showCategories = true },
+                    myNames = vm.myNames,
+                    onSaveNames = vm::saveMyNames,
+                    onDetectSelf = vm::detectSelfTransfers,
                 )
             }
         }
@@ -208,10 +233,15 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
             onDismiss = { editing = null },
             onSave = { nt, applyAll -> vm.updateTxn(nt, applyAll); editing = null },
             onDelete = { vm.deleteTxn(t); editing = null },
+            onCreateCategory = { vm.saveCategory(it, null) },
         )
     }
     if (adding) {
-        AddTxnSheet(onDismiss = { adding = false }, onSave = { vm.addManual(it); adding = false })
+        AddTxnSheet(
+            onDismiss = { adding = false },
+            onSave = { vm.addManual(it); adding = false },
+            onCreateCategory = { vm.saveCategory(it, null) },
+        )
     }
     budgetEdit?.let { b ->
         BudgetSheet(

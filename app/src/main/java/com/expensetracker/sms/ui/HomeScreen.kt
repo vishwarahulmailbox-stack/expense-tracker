@@ -5,9 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -17,22 +19,26 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowDownward
-import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Inbox
-import androidx.compose.material.icons.rounded.Savings
+import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,30 +64,29 @@ fun HomeScreen(
     onOpenBudgets: () -> Unit,
 ) {
     LazyColumn(
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item { HeroCard(s, onOpenBudgets) }
-        item { QuickStats(s) }
-        if (s.byCategory.isNotEmpty()) item { CategoryBreakdown(s) }
+        if (s.byCategory.isNotEmpty() || s.incomeByCategory.isNotEmpty()) item { BreakdownCard(s) }
         if (s.spent > 0) item { DailySpendCard(s) }
-        item { SectionHeader("Recent transactions", if (s.txns.isNotEmpty()) "See all" else null, onSeeAll) }
         item {
-            if (s.txns.isEmpty()) {
-                AppCard {
-                    EmptyState(
-                        Icons.Rounded.Inbox,
-                        "No transactions yet",
-                        "Bank and UPI SMS will show up here automatically. You can also add a cash expense with the + button.",
-                    )
-                }
-            } else {
-                AppCard(padding = PaddingValues(vertical = 6.dp)) {
-                    val recent = s.txns.take(6)
-                    recent.forEachIndexed { i, t ->
-                        TxnRow(t) { onTxn(t) }
-                        if (i < recent.lastIndex) {
-                            HorizontalDivider(Modifier.padding(start = 72.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            Column {
+                SectionHeader("Recent", if (s.txns.isNotEmpty()) "See all" else null, onSeeAll)
+                if (s.txns.isEmpty()) {
+                    AppCard {
+                        EmptyState(
+                            Icons.Rounded.Inbox,
+                            "No transactions yet",
+                            "Bank and UPI SMS show up here automatically. Add cash spends with the + button.",
+                        )
+                    }
+                } else {
+                    AppCard(padding = PaddingValues(vertical = 4.dp)) {
+                        val recent = s.txns.take(6)
+                        recent.forEachIndexed { i, t ->
+                            TxnRow(t) { onTxn(t) }
+                            if (i < recent.lastIndex) RowDivider()
                         }
                     }
                 }
@@ -91,146 +96,175 @@ fun HomeScreen(
 }
 
 @Composable
+fun RowDivider() = HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+@Composable
 private fun HeroCard(s: UiState, onOpenBudgets: () -> Unit) {
     val limit = s.budgets[Categories.TOTAL]
     val monthName = s.month.month.getDisplayName(java.time.format.TextStyle.FULL, Locale.ENGLISH)
-    val onHero = Color.White
-    Box(
+    val elapsed = if (s.month == YearMonth.now()) LocalDate.now().dayOfMonth else s.month.lengthOfMonth()
+    val daysLeft = if (s.month == YearMonth.now()) s.month.lengthOfMonth() - LocalDate.now().dayOfMonth + 1 else 0
+    val white = Color.White
+    val dim = white.copy(alpha = 0.75f)
+
+    Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(Brush.linearGradient(listOf(AppColors.heroStart, AppColors.heroEnd)))
             .clickable(onClick = onOpenBudgets)
-            .padding(20.dp),
+            .padding(horizontal = 18.dp, vertical = 16.dp),
     ) {
-        Column {
-            Text("Spent in $monthName", color = onHero.copy(alpha = 0.8f), style = MaterialTheme.typography.labelLarge)
-            Spacer(Modifier.height(4.dp))
-            Text(fmt(s.spent), color = onHero, style = MoneyStyle, fontSize = 38.sp)
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(22.dp).clip(CircleShape).background(onHero.copy(alpha = 0.18f)),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.ArrowDownward, null, tint = onHero, modifier = Modifier.size(14.dp)) }
-                Spacer(Modifier.width(6.dp))
-                Text("Income ", color = onHero.copy(alpha = 0.8f), style = MaterialTheme.typography.bodyMedium)
-                Text(fmt(s.income), color = onHero, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.Bottom) {
+            Column(Modifier.weight(1f)) {
+                Text("Spent in $monthName", color = dim, style = MaterialTheme.typography.labelMedium)
+                Text(fmt(s.spent), color = white, style = MoneyStyle, fontSize = 32.sp, maxLines = 1)
             }
-            Spacer(Modifier.height(16.dp))
             if (limit != null) {
-                val ratio = s.spent / limit
-                val daysLeft = if (s.month == YearMonth.now()) s.month.lengthOfMonth() - LocalDate.now().dayOfMonth + 1 else 0
-                ThinProgress(
-                    ratio,
-                    color = if (ratio >= 1.0) Color(0xFFFCA5A5) else if (ratio >= 0.8) Color(0xFFFCD34D) else onHero,
-                    track = onHero.copy(alpha = 0.2f),
-                    height = 8.dp,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row {
-                    Text(
-                        if (s.spent > limit) "Over budget by ${fmt(s.spent - limit)}" else "${fmt(limit - s.spent)} left of ${fmt(limit)}",
-                        color = onHero,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (daysLeft > 0) {
-                        Text(
-                            "$daysLeft day${if (daysLeft == 1) "" else "s"} left",
-                            color = onHero.copy(alpha = 0.8f),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            } else {
-                Row(
-                    Modifier.clip(CircleShape).background(onHero.copy(alpha = 0.16f)).padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Rounded.Savings, null, tint = onHero, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Set a monthly budget", color = onHero, style = MaterialTheme.typography.labelLarge)
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Budget", color = dim, style = MaterialTheme.typography.labelMedium)
+                    Text(fmt(limit), color = white, style = MaterialTheme.typography.titleMedium)
                 }
             }
+        }
+        if (limit != null) {
+            val ratio = s.spent / limit
+            Spacer(Modifier.height(10.dp))
+            ThinProgress(
+                ratio,
+                color = if (ratio >= 1.0) Color(0xFFFCA5A5) else if (ratio >= 0.8) Color(0xFFFCD34D) else white,
+                track = white.copy(alpha = 0.2f),
+                height = 6.dp,
+            )
+            Spacer(Modifier.height(6.dp))
+            Row {
+                Text(
+                    if (s.spent > limit) "Over by ${fmt(s.spent - limit)}" else "${fmt(limit - s.spent)} left",
+                    color = white, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f),
+                )
+                if (daysLeft > 0 && s.spent < limit) {
+                    Text("${fmt(Math.floor((limit - s.spent) / daysLeft))}/day · $daysLeft days left", color = dim, style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        // Stat strip
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+                .clip(RoundedCornerShape(14.dp))
+                .background(white.copy(alpha = 0.12f))
+                .padding(vertical = 8.dp),
+        ) {
+            HeroStat("Income", fmt(s.income), Modifier.weight(1f))
+            VLine()
+            HeroStat("Daily avg", fmt(Math.round(if (elapsed > 0) s.spent / elapsed else 0.0).toDouble()), Modifier.weight(1f))
+            VLine()
+            HeroStat(if (limit == null) "Set budget" else "Payments", if (limit == null) "Tap here" else "${s.active.count { it.isDebit }}", Modifier.weight(1f))
         }
     }
 }
 
 @Composable
-private fun QuickStats(s: UiState) {
-    val elapsed = if (s.month == YearMonth.now()) LocalDate.now().dayOfMonth else s.month.lengthOfMonth()
-    val avg = if (elapsed > 0) s.spent / elapsed else 0.0
-    val top = s.byCategory.maxByOrNull { it.value }
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        StatTile(
-            Modifier.weight(1f),
-            icon = Icons.Rounded.CalendarToday,
-            tint = MaterialTheme.colorScheme.primary,
-            label = "Daily average",
-            value = fmt(Math.round(avg).toDouble()),
-        )
-        StatTile(
-            Modifier.weight(1f),
-            icon = top?.let { categoryIcon(it.key) } ?: Icons.Rounded.Savings,
-            tint = top?.let { Categories.color(it.key) } ?: MaterialTheme.colorScheme.primary,
-            label = top?.let { "Top: ${it.key}" } ?: "Top category",
-            value = top?.let { fmt(it.value) } ?: "—",
-        )
+private fun HeroStat(label: String, value: String, modifier: Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
+        Text(value, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1)
     }
 }
 
 @Composable
-private fun StatTile(modifier: Modifier, icon: ImageVector, tint: Color, label: String, value: String) {
-    AppCard(modifier) {
-        Box(
-            Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(tint.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center,
-        ) { Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp)) }
-        Spacer(Modifier.height(10.dp))
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(value, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-    }
-}
+private fun VLine() = Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White.copy(alpha = 0.2f)))
 
 @Composable
-private fun CategoryBreakdown(s: UiState) {
-    val cats = s.byCategory.entries.sortedByDescending { it.value }
+private fun BreakdownCard(s: UiState) {
+    var income by rememberSaveable { mutableStateOf(false) }
+    val data = if (income) s.incomeByCategory else s.byCategory
+    val total = data.values.sum()
+    val cats = data.entries.sortedByDescending { it.value }
     val shown = cats.take(5)
     val rest = cats.drop(5).sumOf { it.value }
-    val slices = shown.map { Categories.color(it.key) to it.value } +
-        if (rest > 0) listOf(MaterialTheme.colorScheme.outline to rest) else emptyList()
+    val otherColor = MaterialTheme.colorScheme.outline
+    val slices = shown.map { Categories.color(it.key) to it.value } + if (rest > 0) listOf(otherColor to rest) else emptyList()
+    val selfCount = s.selfTransfers.size
 
-    AppCard {
-        Text("Spending by category", style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.height(16.dp))
+    AppCard(padding = PaddingValues(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            DonutChart(slices, Modifier.size(132.dp), thickness = 18.dp) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${cats.size}", style = MaterialTheme.typography.headlineSmall)
-                    Text("categories", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Breakdown", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            SingleChoiceSegmentedButtonRow(Modifier.height(32.dp)) {
+                SegmentedButton(
+                    selected = !income, onClick = { income = false },
+                    shape = SegmentedButtonDefaults.itemShape(0, 2), icon = {},
+                ) { Text("Spent", style = MaterialTheme.typography.labelMedium) }
+                SegmentedButton(
+                    selected = income, onClick = { income = true },
+                    shape = SegmentedButtonDefaults.itemShape(1, 2), icon = {},
+                ) { Text("Income", style = MaterialTheme.typography.labelMedium) }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        if (cats.isEmpty()) {
+            Text(
+                if (income) "No income this month" else "No spending this month",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 16.dp),
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DonutChart(slices, Modifier.size(104.dp), thickness = 14.dp) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(compact(total), style = MaterialTheme.typography.titleSmall)
+                        Text(if (income) "earned" else "spent", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    shown.forEach { (cat, amt) -> LegendRow(Categories.color(cat), cat, amt, amt / total) }
+                    if (rest > 0) LegendRow(otherColor, "Other", rest, rest / total)
                 }
             }
-            Spacer(Modifier.width(20.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                shown.forEach { (cat, amt) -> LegendRow(Categories.color(cat), cat, amt, amt / s.spent) }
-                if (rest > 0) LegendRow(MaterialTheme.colorScheme.outline, "Other", rest, rest / s.spent)
+        }
+        if (selfCount > 0) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.SyncAlt, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "$selfCount self transfer${if (selfCount == 1) "" else "s"} (${fmt(s.selfTransfers.filter { it.isDebit }.sumOf { it.amount })}) not counted",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
+}
+
+/** ₹1.2L / ₹45.3K style for tight spaces. */
+fun compact(v: Double): String = when {
+    v >= 1_00_00_000 -> "₹%.1fCr".format(Locale.ENGLISH, v / 1_00_00_000)
+    v >= 1_00_000 -> "₹%.1fL".format(Locale.ENGLISH, v / 1_00_000)
+    v >= 10_000 -> "₹%.1fK".format(Locale.ENGLISH, v / 1_000)
+    else -> fmt(Math.round(v).toDouble())
 }
 
 @Composable
 private fun LegendRow(color: Color, label: String, amount: Double, share: Double) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
         Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        Column(horizontalAlignment = Alignment.End) {
-            Text(fmt(amount), style = MaterialTheme.typography.labelLarge)
-            Text("${Math.round(share * 100)}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(
+            "${Math.round(share * 100)}%",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(34.dp),
+        )
+        Text(fmt(amount), style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
 }
 
@@ -240,23 +274,21 @@ private fun DailySpendCard(s: UiState) {
     val daily = DoubleArray(days)
     s.active.filter { it.isDebit }.forEach { daily[toLocalDate(it.timestamp).dayOfMonth - 1] += it.amount }
     val today = LocalDate.now()
-    val highlight = if (YearMonth.from(today) == s.month) today.dayOfMonth - 1 else daily.indices.maxByOrNull { daily[it] } ?: -1
+    val highlight = if (YearMonth.from(today) == s.month) today.dayOfMonth - 1 else -1
     val maxDay = daily.indices.maxByOrNull { daily[it] } ?: 0
 
-    AppCard {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Column(Modifier.weight(1f)) {
-                Text("Daily spending", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "Highest on ${s.month.atDay(maxDay + 1).format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))} · ${fmt(daily[maxDay])}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+    AppCard(padding = PaddingValues(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Daily spending", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text(
+                "Peak ${s.month.atDay(maxDay + 1).format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))} · ${fmt(daily[maxDay])}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        Spacer(Modifier.height(16.dp))
-        DailyBars(daily, highlight, Modifier.fillMaxWidth().height(96.dp))
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(10.dp))
+        DailyBars(daily, highlight, Modifier.fillMaxWidth().height(64.dp))
+        Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             listOf(1, 8, 15, 22, days).forEach {
                 Text("$it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -265,32 +297,27 @@ private fun DailySpendCard(s: UiState) {
     }
 }
 
-private val timeFmt = DateTimeFormatter.ofPattern("d MMM · h:mm a", Locale.ENGLISH)
+private val timeFmt = DateTimeFormatter.ofPattern("d MMM, h:mm a", Locale.ENGLISH)
 
 @Composable
 fun TxnRow(t: Txn, onClick: () -> Unit) {
     val time = Instant.ofEpochMilli(t.timestamp).atZone(ZoneId.systemDefault()).format(timeFmt)
+    val isSelf = t.category == Categories.SELF
     Row(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .alpha(if (t.ignored) 0.55f else 1f),
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .alpha(if (t.ignored) 0.6f else 1f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CategoryBadge(t.category, 42.dp)
-        Spacer(Modifier.width(14.dp))
+        CategoryBadge(t.category, 38.dp)
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
+            Text(t.merchant, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                t.merchant,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOfNotNull(t.category, time, t.note.ifBlank { null }).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
+                listOfNotNull(t.category, time, t.account?.let { "••$it" }, t.note.ifBlank { null }).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -300,15 +327,17 @@ fun TxnRow(t: Txn, onClick: () -> Unit) {
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 (if (t.isDebit) "−" else "+") + fmt(t.amount),
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = if (t.isDebit) MaterialTheme.colorScheme.onSurface else AppColors.income,
-                textDecoration = if (t.ignored) TextDecoration.LineThrough else null,
+                color = when {
+                    t.ignored -> MaterialTheme.colorScheme.onSurfaceVariant
+                    t.isDebit -> MaterialTheme.colorScheme.onSurface
+                    else -> AppColors.income
+                },
+                textDecoration = if (t.ignored && !isSelf) TextDecoration.LineThrough else null,
             )
             if (t.ignored) {
-                Text("Excluded", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else if (t.account != null) {
-                Text("••${t.account}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (isSelf) "Not counted" else "Excluded", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

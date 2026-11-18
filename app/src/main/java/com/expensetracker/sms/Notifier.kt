@@ -47,7 +47,7 @@ object Notifier {
 
     fun newTxn(ctx: Context, t: Txn) {
         val title = if (t.isDebit) "${fmt(t.amount)} spent · ${t.merchant}" else "${fmt(t.amount)} received · ${t.merchant}"
-        show(ctx, CH_TXN, (t.id % 100000).toInt() + 10, title, "${Categories.emoji(t.category)} ${t.category} — tap to change category")
+        show(ctx, CH_TXN, (t.id % 100000).toInt() + 10, title, "${t.category} · tap to change category")
     }
 
     fun budget(ctx: Context, id: Int, title: String, text: String) = show(ctx, CH_BUDGET, id, title, text)
@@ -66,7 +66,7 @@ object BudgetAlerts {
         }
         budgets[t.category]?.let { limit ->
             val now = month.filter { it.category == t.category }.sumOf { it.amount }
-            check(ctx, 2 + Categories.all.indexOf(t.category), "${Categories.emoji(t.category)} ${t.category} budget", now - t.amount, now, limit)
+            check(ctx, 2 + (t.category.hashCode() and 0xFFFF), "${t.category} budget", now - t.amount, now, limit)
         }
     }
 

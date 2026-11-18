@@ -7,13 +7,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.expensetracker.sms.ui.AddTxnContent
 import com.expensetracker.sms.ui.AppTheme
 import com.expensetracker.sms.ui.BudgetEditorContent
 import com.expensetracker.sms.ui.BudgetScreen
 import com.expensetracker.sms.ui.HomeScreen
-import com.expensetracker.sms.ui.MonthSwitcher
+import com.expensetracker.sms.ui.MonthPill
+import com.expensetracker.sms.ui.CategoriesScreen
+import com.expensetracker.sms.ui.CategoryEditorContent
 import com.expensetracker.sms.ui.OnboardingScreen
 import com.expensetracker.sms.ui.SettingsScreen
 import com.expensetracker.sms.ui.TransactionsScreen
@@ -50,7 +55,10 @@ class ScreenshotTest {
         t(349.0, "Swiggy", "Food", 0, 20),
         t(1249.0, "Amazon", "Shopping", 0, 11),
         t(180.0, "Uber India", "Travel", 1, 9),
-        t(85000.0, "Acme Technologies", Categories.INCOME, 1, 10, debit = false),
+        t(85000.0, "Acme Technologies", "Salary", 1, 10, debit = false),
+        t(1240.0, "HDFC Bank", "Interest", 2, 9, debit = false),
+        t(3200.0, "Infosys Ltd", "Dividend", 6, 11, debit = false),
+        t(10000.0, "Vishwa Rahul", Categories.SELF, 3, 12, ignored = true),
         t(620.0, "Blinkit", "Groceries", 2, 19),
         t(2000.0, "ATM Withdrawal", "ATM/Cash", 3, 17),
         t(649.0, "Netflix", "Entertainment", 4, 8),
@@ -76,10 +84,17 @@ class ScreenshotTest {
         }
     }
 
+    /** Mimics the real top bar so screenshots show the true amount of space used. */
     @Composable
     private fun WithMonth(content: @Composable () -> Unit) {
         Column {
-            MonthSwitcher(state.month, {}, {})
+            androidx.compose.foundation.layout.Row(
+                Modifier.padding(horizontal = 16.dp).height(64.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.Text("Overview", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                MonthPill(state.month, {}, {})
+            }
             content()
         }
     }
@@ -95,6 +110,8 @@ class ScreenshotTest {
     @Test fun onboardingDenied() = shot("5b_onboarding_denied") { OnboardingScreen(true, {}, {}, {}) }
     @Test fun editSheet() = shot("6_edit_sheet") { Box { TxnEditorContent(txns[0], { _, _ -> }, {}) } }
     @Test fun addSheet() = shot("7_add_sheet") { AddTxnContent {} }
+    @Test fun categories() = shot("9_categories") { CategoriesScreen({ _, _ -> }, {}) }
+    @Test fun categoryEditor() = shot("9b_category_editor") { CategoryEditorContent(null, CatType.EXPENSE, { _, _ -> }) }
     @Test fun budgetSheet() = shot("8_budget_sheet") {
         BudgetEditorContent(null, null, state.byCategory, setOf("Food", "Shopping", "Fuel")) { _, _ -> }
     }

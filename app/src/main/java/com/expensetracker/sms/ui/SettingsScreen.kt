@@ -20,6 +20,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.Category
+import androidx.compose.material.icons.rounded.SyncAlt
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.Info
@@ -53,12 +58,17 @@ fun SettingsScreen(
     onExport: () -> Unit,
     onClearAll: () -> Unit,
     onPrivacy: () -> Unit,
+    onOpenCategories: () -> Unit = {},
+    myNames: String = "",
+    onSaveNames: (String) -> Unit = {},
+    onDetectSelf: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var confirmClear by remember { mutableStateOf(false) }
+    var editNames by remember { mutableStateOf(false) }
 
     LazyColumn(
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
@@ -78,6 +88,19 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+        }
+        item {
+            SettingsGroup("Categories & detection") {
+                SettingsRow(Icons.Rounded.Category, "Categories", "Create your own, change icons and colours", onClick = onOpenCategories)
+                Divider()
+                SettingsRow(
+                    Icons.Rounded.Badge, "Your name for self transfers",
+                    myNames.ifBlank { "Add the name on your bank accounts" },
+                    onClick = { editNames = true },
+                )
+                Divider()
+                SettingsRow(Icons.Rounded.SyncAlt, "Find self transfers", "Mark money moved between your own accounts", onClick = onDetectSelf)
             }
         }
         item {
@@ -110,6 +133,35 @@ fun SettingsScreen(
                 SettingsRow(Icons.Rounded.Info, "Version", BuildConfig.VERSION_NAME, showArrow = false, onClick = {})
             }
         }
+    }
+
+    if (editNames) {
+        var text by remember { mutableStateOf(myNames) }
+        AlertDialog(
+            onDismissRequest = { editNames = false },
+            icon = { Icon(Icons.Rounded.Badge, null) },
+            title = { Text("Your name") },
+            text = {
+                Column {
+                    Text(
+                        "Transfers to or from this name (e.g. IMPS to your other bank) are marked as self transfers and not counted. " +
+                            "Write it as banks show it. Separate multiple names with commas.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        placeholder = { Text("e.g. Rahul Vishwa, R Vishwa") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { editNames = false; onSaveNames(text) }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { editNames = false }) { Text("Cancel") } },
+        )
     }
 
     if (confirmClear) {
@@ -154,7 +206,7 @@ private fun SettingsRow(
     onClick: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(24.dp))

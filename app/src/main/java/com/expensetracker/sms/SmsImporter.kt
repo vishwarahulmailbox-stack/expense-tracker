@@ -14,11 +14,19 @@ object SmsImporter {
     }
 
     /** Parses and saves one SMS. Returns true if a new transaction was saved. */
-    fun handle(ctx: Context, addr: String, body: String, ts: Long, notify: Boolean): Boolean {
+    fun handle(
+        ctx: Context,
+        addr: String,
+        body: String,
+        ts: Long,
+        notify: Boolean,
+        names: List<String> = SelfTransfer.myNames(ctx),
+        known: Set<String> = Db.get(ctx).knownAccounts(),
+    ): Boolean {
         val p = SmsParser.parse(addr, body) ?: return false
         val db = Db.get(ctx)
         val category = Categorizer.categorize(p.merchant, body, p.isDebit, db.ruleFor(p.merchant))
-        val t = Txn(
+        var t = Txn(
             smsKey = key(addr, body),
             amount = p.amount,
             isDebit = p.isDebit,
@@ -28,10 +36,21 @@ object SmsImporter {
             timestamp = ts,
             body = body,
         )
+        if (category == Categories.SELF || SelfTransfer.byContent(t.merchant, body, t.account, names, known)) {
+            t = SelfTransfer.mark(t)
+        }
         val id = db.insert(t)
         if (id == -1L) return false
-        if (notify) {
-            Notifier.newTxn(ctx, t.copy(id = id))
+        t = t.copy(id = id)
+        if (t.category != Categories.SELF) {
+            SelfTransfer.findPair(db, t)?.let { pair ->
+                db.update(SelfTransfer.mark(t))
+                db.update(SelfTransfer.mark(pair))
+                t = SelfTransfer.mark(t)
+            }
+        }
+        if (notify && t.category != Categories.SELF) {
+            Notifier.newTxn(ctx, t)
             if (t.isDebit) BudgetAlerts.onNewDebit(ctx, t)
         }
         return true
@@ -42,6 +61,7 @@ object SmsImporter {
         val since = System.currentTimeMillis() - days * 86_400_000L
         var count = 0
         val db = Db.get(ctx).writableDatabase
+        val names = SelfTransfer.myNames(ctx)
         try {
             ctx.contentResolver.query(
                 Telephony.Sms.Inbox.CONTENT_URI,
@@ -58,7 +78,7 @@ object SmsImporter {
                     while (c.moveToNext()) {
                         val addr = c.getString(ia) ?: continue
                         val body = c.getString(ib) ?: continue
-                        if (handle(ctx, addr, body, c.getLong(id), notify = false)) count++
+                        if (handle(ctx, addr, body, c.getLong(id), notify = false, names = names, known = Db.get(ctx).knownAccounts())) count++
                     }
                     db.setTransactionSuccessful()
                 } finally {
@@ -68,6 +88,8 @@ object SmsImporter {
         } catch (e: SecurityException) {
             return 0
         }
+        // Second pass: accounts seen later in the scan can reveal earlier self transfers.
+        SelfTransfer.scanAll(ctx)
         return count
     }
 }

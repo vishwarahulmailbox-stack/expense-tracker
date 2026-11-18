@@ -20,24 +20,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
-import androidx.compose.material.icons.rounded.AccountBalance
-import androidx.compose.material.icons.rounded.Category
-import androidx.compose.material.icons.rounded.DirectionsCar
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.LocalAtm
-import androidx.compose.material.icons.rounded.LocalGasStation
-import androidx.compose.material.icons.rounded.LocalGroceryStore
-import androidx.compose.material.icons.rounded.LocalHospital
-import androidx.compose.material.icons.rounded.Movie
-import androidx.compose.material.icons.rounded.Payments
-import androidx.compose.material.icons.rounded.Receipt
-import androidx.compose.material.icons.rounded.Restaurant
-import androidx.compose.material.icons.rounded.School
-import androidx.compose.material.icons.rounded.ShoppingBag
-import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -65,33 +51,78 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-fun categoryIcon(c: String): ImageVector = when (c) {
-    "Food" -> Icons.Rounded.Restaurant
-    "Groceries" -> Icons.Rounded.LocalGroceryStore
-    "Shopping" -> Icons.Rounded.ShoppingBag
-    "Travel" -> Icons.Rounded.DirectionsCar
-    "Fuel" -> Icons.Rounded.LocalGasStation
-    "Bills" -> Icons.Rounded.Receipt
-    "Rent" -> Icons.Rounded.Home
-    "Entertainment" -> Icons.Rounded.Movie
-    "Health" -> Icons.Rounded.LocalHospital
-    "Education" -> Icons.Rounded.School
-    "EMI/Loan" -> Icons.Rounded.AccountBalance
-    "Investment" -> Icons.AutoMirrored.Rounded.TrendingUp
-    "Transfers" -> Icons.Rounded.SwapHoriz
-    "ATM/Cash" -> Icons.Rounded.LocalAtm
-    Categories.INCOME -> Icons.Rounded.Payments
-    else -> Icons.Rounded.Category
-}
+/** Icons available for categories (key -> icon). Keys are stored in the database. */
+val CategoryIcons: List<Pair<String, ImageVector>> = listOf(
+    "restaurant" to Icons.Rounded.Restaurant,
+    "grocery" to Icons.Rounded.LocalGroceryStore,
+    "shopping" to Icons.Rounded.ShoppingBag,
+    "car" to Icons.Rounded.DirectionsCar,
+    "fuel" to Icons.Rounded.LocalGasStation,
+    "receipt" to Icons.Rounded.Receipt,
+    "home" to Icons.Rounded.Home,
+    "movie" to Icons.Rounded.Movie,
+    "hospital" to Icons.Rounded.LocalHospital,
+    "school" to Icons.Rounded.School,
+    "bank" to Icons.Rounded.AccountBalance,
+    "trending" to Icons.AutoMirrored.Rounded.TrendingUp,
+    "swap" to Icons.Rounded.SwapHoriz,
+    "atm" to Icons.Rounded.LocalAtm,
+    "work" to Icons.Rounded.Work,
+    "home_work" to Icons.Rounded.HomeWork,
+    "pie" to Icons.Rounded.PieChart,
+    "savings" to Icons.Rounded.Savings,
+    "replay" to Icons.Rounded.Replay,
+    "payments" to Icons.Rounded.Payments,
+    "sync" to Icons.Rounded.SyncAlt,
+    "cafe" to Icons.Rounded.LocalCafe,
+    "bar" to Icons.Rounded.LocalBar,
+    "flight" to Icons.Rounded.Flight,
+    "train" to Icons.Rounded.Train,
+    "bike" to Icons.Rounded.TwoWheeler,
+    "pets" to Icons.Rounded.Pets,
+    "fitness" to Icons.Rounded.FitnessCenter,
+    "spa" to Icons.Rounded.Spa,
+    "clothes" to Icons.Rounded.Checkroom,
+    "child" to Icons.Rounded.ChildCare,
+    "family" to Icons.Rounded.FamilyRestroom,
+    "gift" to Icons.Rounded.CardGiftcard,
+    "party" to Icons.Rounded.Celebration,
+    "phone" to Icons.Rounded.PhoneAndroid,
+    "wifi" to Icons.Rounded.Wifi,
+    "laptop" to Icons.Rounded.Laptop,
+    "games" to Icons.Rounded.SportsEsports,
+    "repair" to Icons.Rounded.Build,
+    "medicine" to Icons.Rounded.Medication,
+    "charity" to Icons.Rounded.VolunteerActivism,
+    "card" to Icons.Rounded.CreditCard,
+    "money" to Icons.Rounded.AttachMoney,
+    "star" to Icons.Rounded.Star,
+    "category" to Icons.Rounded.Category,
+)
+private val iconMap = CategoryIcons.toMap()
+
+fun iconFor(key: String): ImageVector = iconMap[key] ?: Icons.Rounded.Category
+
+fun categoryIcon(c: String): ImageVector = iconFor(Categories.iconKey(c))
+
+/** Colours offered for custom categories. */
+val CategoryColors: List<Long> = listOf(
+    0xFFF97316, 0xFFEF4444, 0xFFEC4899, 0xFFD946EF, 0xFF8B5CF6, 0xFF6366F1,
+    0xFF3B82F6, 0xFF0EA5E9, 0xFF06B6D4, 0xFF14B8A6, 0xFF10B981, 0xFF22C55E,
+    0xFF84CC16, 0xFFEAB308, 0xFFB45309, 0xFF64748B,
+)
 
 @Composable
-fun CategoryBadge(category: String, size: Dp = 44.dp) {
-    val c = Categories.color(category)
+fun CategoryBadge(category: String, size: Dp = 40.dp) =
+    IconBadge(Categories.iconKey(category), Categories.color(category), size)
+
+@Composable
+fun IconBadge(iconKey: String, color: Color, size: Dp = 40.dp) {
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(size * 0.3f)).background(c.copy(alpha = 0.15f)),
+        Modifier.size(size).clip(RoundedCornerShape(size * 0.3f)).background(color.copy(alpha = 0.15f)),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(categoryIcon(category), contentDescription = null, tint = c, modifier = Modifier.size(size * 0.52f))
+        Icon(iconFor(iconKey), contentDescription = null, tint = color, modifier = Modifier.size(size * 0.52f))
     }
 }
 
@@ -116,39 +147,32 @@ fun AppCard(
 @Composable
 fun SectionHeader(title: String, action: String? = null, onAction: (() -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 4.dp, top = 8.dp),
+        Modifier.fillMaxWidth().height(40.dp).padding(start = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
         if (action != null && onAction != null) {
-            TextButton(onClick = onAction) { Text(action) }
-        } else {
-            Spacer(Modifier.height(48.dp))
+            TextButton(onClick = onAction, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(action) }
         }
     }
 }
 
+/** Compact "‹ Nov 2026 ›" control that lives in the top bar. */
 @Composable
-fun MonthSwitcher(month: YearMonth, onPrev: () -> Unit, onNext: () -> Unit, modifier: Modifier = Modifier) {
-    Row(
-        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerLowest) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onPrev) {
-                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, "Previous month")
-                }
-                Text(
-                    month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)),
-                    style = MaterialTheme.typography.titleSmall,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.width(132.dp),
-                )
-                IconButton(onClick = onNext, enabled = month < YearMonth.now()) {
-                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Next month")
-                }
+fun MonthPill(month: YearMonth, onPrev: () -> Unit, onNext: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(modifier, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerLowest) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onPrev, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, "Previous month", Modifier.size(20.dp))
+            }
+            Text(
+                month.format(DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH)),
+                style = MaterialTheme.typography.labelLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.width(72.dp),
+            )
+            IconButton(onClick = onNext, enabled = month < YearMonth.now(), modifier = Modifier.size(36.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Next month", Modifier.size(20.dp))
             }
         }
     }

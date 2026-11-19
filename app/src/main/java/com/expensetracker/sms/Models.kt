@@ -26,6 +26,8 @@ data class Txn(
     val bank: String? = null,
     val acctType: AcctType? = null,
     val balance: Double? = null,
+    /** "bank", "app" (payment-app SMS, may be merged into the bank's) or null for manual entries. */
+    val source: String? = null,
 ) {
     /** Groups transactions of the same account / card. */
     val accountKey: String? get() = account?.let { "${bank ?: "Account"}|$it" }
@@ -142,3 +144,6 @@ fun dayLabel(ts: Long): String {
 }
 
 fun shortTime(ts: Long): String = Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()).format(shortFmt)
+
+/** An SMS that was not treated as a transaction (OTPs and personal messages are never stored). */
+data class SkippedSms(val key: String, val sender: String, val body: String, val timestamp: Long, val reason: SkipReason)

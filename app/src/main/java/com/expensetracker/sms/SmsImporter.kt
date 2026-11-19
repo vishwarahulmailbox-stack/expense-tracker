@@ -23,7 +23,40 @@ object SmsImporter {
         names: List<String> = SelfTransfer.myNames(ctx),
         known: Set<String> = Db.get(ctx).knownAccounts(),
     ): Boolean {
-        val p = SmsParser.parse(addr, body) ?: return false
+        when (val r = SmsParser.classify(addr, body)) {
+            is ParseResult.Skip -> {
+                // OTPs and personal messages are never stored. Others are kept for review if they mention money.
+                if (r.reason.keep && SmsParser.hasAmount(body)) {
+                    Db.get(ctx).addSkipped(key(addr, body), addr, body, ts, r.reason)
+                }
+                return false
+            }
+            is ParseResult.Ok -> return save(ctx, r.txn, addr, body, ts, notify, names, known)
+        }
+    }
+
+    /** "Add as transaction" on a skipped message. */
+    fun addSkipped(ctx: Context, s: SkippedSms): Boolean {
+        val r = SmsParser.classify(s.sender, s.body, lenient = true)
+        val ok = r is ParseResult.Ok && save(
+            ctx, r.txn, s.sender, s.body, s.timestamp, notify = false,
+            names = SelfTransfer.myNames(ctx), known = Db.get(ctx).knownAccounts(), force = true,
+        )
+        if (ok) Db.get(ctx).deleteSkipped(s.key)
+        return ok
+    }
+
+    private fun save(
+        ctx: Context,
+        p: ParsedTxn,
+        addr: String,
+        body: String,
+        ts: Long,
+        notify: Boolean,
+        names: List<String>,
+        known: Set<String>,
+        force: Boolean = false,
+    ): Boolean {
         val db = Db.get(ctx)
         val category = Categorizer.categorize(p.merchant, body, p.isDebit, db.ruleFor(p.merchant))
         var t = Txn(
@@ -35,16 +68,35 @@ object SmsImporter {
             category = category,
             timestamp = ts,
             body = body,
-            bank = p.bank,
-            acctType = p.acctType,
-            balance = p.balance,
+            bank = if (p.fromApp) null else p.bank,
+            acctType = if (p.fromApp) null else p.acctType,
+            balance = if (p.fromApp) null else p.balance,
+            source = if (p.fromApp) "app" else "bank",
         )
+
+        // A payment-app SMS for a payment the bank already reported: just improve the bank's entry.
+        if (p.fromApp && !force) {
+            Dedupe.bankMatch(db, t)?.let { bank ->
+                Dedupe.merge(db, bank, t)
+                return false
+            }
+        }
+
         if (category == Categories.SELF || SelfTransfer.byContent(t.merchant, body, t.account, names, known)) {
             t = SelfTransfer.mark(t)
         }
         val id = db.insert(t)
         if (id == -1L) return false
         t = t.copy(id = id)
+
+        // The bank SMS arrived after an app SMS for the same payment: merge and drop the app copy.
+        if (!p.fromApp) {
+            Dedupe.appCopies(db, t).forEach { app ->
+                t = Dedupe.merge(db, t, app)
+                db.deleteTxn(app.id)
+            }
+        }
+
         if (t.category != Categories.SELF) {
             SelfTransfer.findPair(db, t)?.let { pair ->
                 db.update(SelfTransfer.mark(t))
@@ -52,7 +104,8 @@ object SmsImporter {
                 t = SelfTransfer.mark(t)
             }
         }
-        if (notify && t.category != Categories.SELF) {
+        // App SMS don't notify: the bank SMS that usually follows will.
+        if (notify && !p.fromApp && t.category != Categories.SELF) {
             Notifier.newTxn(ctx, t)
             if (t.isDebit) BudgetAlerts.onNewDebit(ctx, t)
         }
@@ -93,6 +146,8 @@ object SmsImporter {
         }
         // Second pass: accounts seen later in the scan can reveal earlier self transfers.
         SelfTransfer.scanAll(ctx)
+        Dedupe.scanAll(ctx)
+        Db.get(ctx).pruneSkipped()
         return count
     }
 }

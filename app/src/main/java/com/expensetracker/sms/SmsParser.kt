@@ -9,9 +9,30 @@ data class ParsedTxn(
     val acctType: AcctType? = null,
     /** Bank balance, or available limit for credit cards, if the SMS mentions it. */
     val balance: Double? = null,
+    /** Sent by a payment app (PhonePe, Paytm, Amazon Pay…) rather than a bank: may duplicate a bank SMS. */
+    val fromApp: Boolean = false,
 )
 
 data class AccountInfo(val bank: String, val type: AcctType?, val balance: Double?)
+
+/** Why an SMS was not treated as a transaction. [keep] = show it in "Skipped messages". */
+enum class SkipReason(val label: String, val keep: Boolean) {
+    PERSONAL("Personal message", false),
+    OTP("OTP", false),
+    MANDATE_SETUP("Autopay / mandate setup", true),
+    REMINDER("Reminder or upcoming payment", true),
+    REQUEST("Payment request", true),
+    FAILED("Failed or declined", true),
+    PROMO("Offer or promotion", true),
+    NO_DIRECTION("No debit / credit mentioned", true),
+    NO_AMOUNT("No amount", false),
+    NOT_FROM_BANK("Not from a bank", true),
+}
+
+sealed interface ParseResult {
+    data class Ok(val txn: ParsedTxn) : ParseResult
+    data class Skip(val reason: SkipReason) : ParseResult
+}
 
 /**
  * Turns an Indian bank / UPI / card SMS into a transaction.
@@ -27,27 +48,45 @@ object SmsParser {
         IC,
     )
 
+    /** OTP *delivery* phrases. A bank footer like "Never share your OTP" does not match. */
     private val otpRx = Regex(
-        """(otp is|is your otp|is the otp|otp for|otp to|one[\s-]?time[\s-]?password|verification code|\b\d{4,8} is your)""",
-        IC,
-    )
-
-    private val ignoreRx = Regex(
         listOf(
-            "will be debited", "will be auto[- ]?debited", "to be debited", "is due", "due on", "due by",
-            "due date", "minimum amount", "min\\.? amt", "total amount due", "requested", "collect request",
-            "request of", "offer", "pre-?approved", "eligible", "apply now", "congratulations", "\\bwin\\b",
-            "failed", "declined", "unsuccessful", "insufficient", "reversal", "has been blocked",
-            "e-?mandate", "standing instruction", "autopay set",
+            "otp is", "is your otp", "is the otp", "otp for", "otp to (?:complete|authenticate|verify|proceed|login|log in|confirm|approve)",
+            "otp\\s*[:-]\\s*\\d", "use otp", "enter otp", "otp \\d{4,8}", "one[\\s-]?time[\\s-]?pass(?:word|code)\\s*(?:is|for|:)",
+            "verification code", "secure code", "authentication code", "security code is", "code is \\d", "\\b\\d{4,8} is (?:your|the)\\b",
+            "passcode is",
         ).joinToString("|", "(", ")"),
         IC,
+    )
+    private fun rx(vararg p: String) = Regex(p.joinToString("|", "(", ")"), IC)
+
+    private val mandateSetupRx = rx(
+        "(?:e-?mandate|mandate|autopay|auto-pay|auto pay|standing instruction)[^.]{0,50}?(?:has been |is |was )?(?:successfully )?(?:registered|created|set ?up|setup|approved|activated|enabled|modified|revoked|cancelled|paused)\\b",
+        "mandate registration", "(?:upi )?autopay (?:request|mandate)",
+    )
+    private val reminderRx = rx(
+        "will be debited", "will be auto[- ]?debited", "to be debited", "will be charged", "will be deducted",
+        "is due", "due on", "due by", "due date", "minimum amount due", "min\\.? amt due", "total amount due",
+        "total amt due", "payment reminder", "upcoming", "is scheduled", "scheduled for", "pay now",
+    )
+    private val requestRx = rx("has requested", "requested (?:rs|inr|₹|money|payment)", "collect request", "request of", "payment request", "is requesting")
+    private val failedRx = rx("failed", "declined", "unsuccessful", "insufficient", "could not be processed", "not successful", "rejected")
+    private val reversalRx = rx("reversed", "reversal", "refunded", "refund of", "credited back", "has been refunded")
+    private val promoRx = rx(
+        "offer", "offers", "pre-?approved", "eligible", "apply now", "congratulations", "\\bwin\\b", "\\bupto\\b",
+        "limited period", "hurry", "exclusive", "voucher worth", "loan of up ?to", "claim now", "click to claim",
+    )
+    /** Signs that an SMS is about a real account: masked number or a payment reference. */
+    private val accountRefRx = rx(
+        "[xX*]{2,}\\s?\\d{3,}", "\\b(?:a/c|acct|account|card)\\s*(?:no\\.?)?\\s*(?:ending\\s*)?[xX*.]*\\d{3,}",
+        "\\b(?:upi ref|ref no|ref#|refno|rrn|utr|txn id|transaction id|imps ref|ref\\.? no)",
     )
 
     private val debitRx = Regex(
         """\b(debited|spent|paid|sent|withdrawn|withdrawal|purchased?|deducted|txn of|transaction of|payment of|dr\b)""",
         IC,
     )
-    private val creditRx = Regex("""\b(credited|received|deposited|refund(?:ed)?|cr\b)""", IC)
+    private val creditRx = Regex("""\b(credited|received|deposited|refund(?:ed)?|reversed|reversal|credited back|cr\b)""", IC)
 
     private const val STOP =
         """(?=\s+on\b|\s+ref|\s+for\b|\s+via\b|\s+using\b|\s+upi\b|\s+avl|\s+txn|\s+dt\b|\s+date\b|\s+not you|\.\s|\.$|,|;|\(|$)"""
@@ -73,29 +112,55 @@ object SmsParser {
         "bank a/c", "the a/c", "neft", "imps", "rtgs", "upi",
     )
 
-    fun parse(sender: String, body: String): ParsedTxn? {
-        if (sender.none { it.isLetter() }) return null // personal number
-        val text = body.replace('\n', ' ').replace('\r', ' ')
-        if (otpRx.containsMatchIn(text)) return null
-        if (ignoreRx.containsMatchIn(text)) return null
+    fun parse(sender: String, body: String): ParsedTxn? = (classify(sender, body) as? ParseResult.Ok)?.txn
 
+    /** True for OTP messages. These are never read further, stored or shown. */
+    fun isOtp(body: String) = otpRx.containsMatchIn(body)
+
+    fun hasAmount(body: String) = amountRx.containsMatchIn(body)
+
+    /**
+     * Decides whether an SMS is a transaction. [lenient] skips the "is this really a
+     * transaction" checks; used when you tap "Add as transaction" on a skipped message.
+     */
+    fun classify(sender: String, body: String, lenient: Boolean = false): ParseResult {
+        val text = body.replace('\n', ' ').replace('\r', ' ')
+        if (!lenient) {
+            if (sender.none { it.isLetter() }) return ParseResult.Skip(SkipReason.PERSONAL)
+            if (isOtp(text)) return ParseResult.Skip(SkipReason.OTP)
+            if (mandateSetupRx.containsMatchIn(text)) return ParseResult.Skip(SkipReason.MANDATE_SETUP)
+            if (reminderRx.containsMatchIn(text)) return ParseResult.Skip(SkipReason.REMINDER)
+            if (requestRx.containsMatchIn(text)) return ParseResult.Skip(SkipReason.REQUEST)
+            if (failedRx.containsMatchIn(text) && !reversalRx.containsMatchIn(text)) return ParseResult.Skip(SkipReason.FAILED)
+            if (promoRx.containsMatchIn(text) && !accountRefRx.containsMatchIn(text)) return ParseResult.Skip(SkipReason.PROMO)
+        }
+
+        val reversal = reversalRx.containsMatchIn(text)
         val d = debitRx.find(text)
         val c = creditRx.find(text)
-        if (d == null && c == null) return null
+        if (d == null && c == null && !lenient) return ParseResult.Skip(SkipReason.NO_DIRECTION)
         val isDebit = when {
-            d == null -> false
+            reversal -> false // money coming back
+            d == null -> c == null // lenient + no clue -> expense
             c == null -> true
             else -> d.range.first <= c.range.first
         }
 
-        val amount = findAmount(text) ?: return null
-        if (amount <= 0.0) return null
+        val amount = findAmount(text)
+        if (amount == null || amount <= 0.0) return ParseResult.Skip(SkipReason.NO_AMOUNT)
+
+        val kind = Banks.senderKind(sender)
+        if (!lenient && kind == SenderKind.OTHER && !accountRefRx.containsMatchIn(text)) {
+            return ParseResult.Skip(SkipReason.NOT_FROM_BANK)
+        }
 
         val merchant = if (isDebit && atmRx.containsMatchIn(text)) "ATM Withdrawal"
         else findMerchant(text, isDebit) ?: senderName(sender)
         val account = findAccount(text)
         val info = accountInfo(sender, text, account)
-        return ParsedTxn(amount, isDebit, merchant, account, info.bank, info.type, info.balance)
+        return ParseResult.Ok(
+            ParsedTxn(amount, isDebit, merchant, account, info.bank, info.type, info.balance, fromApp = kind == SenderKind.APP)
+        )
     }
 
     private val creditCardRx = Regex("""\b(credit card|creditcard|cc\b|avl\.?\s*lmt|avl\.?\s*limit|available (?:credit )?limit|credit limit)""", IC)

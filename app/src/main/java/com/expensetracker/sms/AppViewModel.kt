@@ -45,8 +45,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var myNames by mutableStateOf(SelfTransfer.namesText(app))
         private set
 
+    var skipped by mutableStateOf<List<SkippedSms>>(emptyList())
+        private set
+
     init {
         viewModelScope.launch { DataBus.version.collect { reload() } }
+        // v4 upgrade: re-read the inbox with the new filters (recovers mandate debits etc.),
+        // fill the skipped list and remove payment-app duplicates.
+        if (prefs.getBoolean("imported", false) && !prefs.getBoolean("rescan_v4", false)) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) {
+                    SmsImporter.importInbox(app, 180)
+                    Dedupe.scanAll(app)
+                }
+                prefs.edit().putBoolean("rescan_v4", true).apply()
+                DataBus.bump()
+            }
+        }
         // One-time pass after upgrading: find self transfers in already-saved data.
         if (!prefs.getBoolean("self_scan_v2", false)) {
             viewModelScope.launch {
@@ -142,6 +157,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteCategory(def: CategoryDef) = io { db.deleteCategory(def) }
 
     fun renameAccount(key: String, nickname: String?) = io { db.setNickname(key, nickname) }
+
+    fun loadSkipped() {
+        viewModelScope.launch { skipped = withContext(Dispatchers.IO) { db.skipped() } }
+    }
+
+    fun addSkippedAsTxn(item: SkippedSms) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { SmsImporter.addSkipped(getApplication(), item) }
+            state = state.copy(message = if (ok) "Added as a transaction" else "Couldn't read an amount — add it with the + button")
+            loadSkipped()
+            DataBus.bump()
+        }
+    }
+
+    fun dismissSkipped(item: SkippedSms) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { db.deleteSkipped(item.key) }
+            loadSkipped()
+        }
+    }
+
+    fun clearSkipped() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { db.clearSkipped() }
+            loadSkipped()
+        }
+    }
 
     fun saveMyNames(text: String) {
         SelfTransfer.setNames(getApplication(), text)

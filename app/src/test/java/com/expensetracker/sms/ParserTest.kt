@@ -160,4 +160,44 @@ class ParserTest {
         assertEquals("Transfers", cat("x", "Sent Rs.500 to 9876543210@ybl"))
         assertEquals(Categories.OTHERS, cat("Sharma Enterprises", "Sent Rs.500 via UPI"))
     }
+
+    // --------------------------------------------------------- filters
+
+    private fun reason(body: String, sender: String = "VM-HDFCBK") =
+        (SmsParser.classify(sender, body) as? ParseResult.Skip)?.reason
+
+    @Test fun otpMessagesAreSkipped() {
+        assertEquals(SkipReason.OTP, reason("Use OTP 482913 to complete txn of Rs 1,200 at Flipkart. Do not share."))
+        assertEquals(SkipReason.OTP, reason("Your OTP for transaction of INR 999.00 at Amazon is 123456"))
+        assertEquals(SkipReason.OTP, reason("482913 is the One Time Password for your txn of Rs 500 on card XX4321"))
+    }
+
+    @Test fun otpFooterOnRealDebitIsNotSkipped() {
+        assertNotNull(parse("Rs.500 debited from A/c XX1234 to VPA swiggy@icici. Never share your OTP/PIN with anyone -HDFC Bank"))
+    }
+
+    @Test fun mandateDebitsAreKeptButSetupIsSkipped() {
+        assertNotNull(parse("Rs 5,000 debited from A/c XX1234 towards SIP via e-mandate. UMRN HDFC0001 -HDFC Bank"))
+        assertNotNull(parse("Rs 799 debited from card XX4321 for Netflix under standing instruction", "JD-ICICIT"))
+        assertEquals(SkipReason.MANDATE_SETUP, reason("Your e-mandate for Rs 5000 has been successfully registered with HDFC Bank"))
+        assertEquals(SkipReason.MANDATE_SETUP, reason("UPI AutoPay request of Rs 199 for Netflix. Approve in your UPI app"))
+    }
+
+    @Test fun promoFooterOnRealTxnIsKept() {
+        assertNotNull(parse("Rs 349 spent on HDFC Bank Card XX4321 at Swiggy. Avl Lmt Rs 45000. Get exclusive offers on loans!"))
+        assertEquals(SkipReason.PROMO, reason("Congratulations! You are eligible for a pre-approved loan of up to Rs 5,00,000. Apply now"))
+    }
+
+    @Test fun reversalIsARefundAndFailuresAreSkipped() {
+        val p = parse("Rs 500 debited for failed txn has been reversed to your A/c XX1234 -HDFC Bank")!!
+        assertFalse(p.isDebit)
+        assertEquals(SkipReason.FAILED, reason("Txn of Rs 500 at Amazon using card XX4321 has been declined"))
+    }
+
+    @Test fun senders() {
+        assertTrue(parse("You paid Rs.349 to Swiggy using UPI. UPI Ref 123456789012", "VM-PHONPE")!!.fromApp)
+        assertFalse(parse("Sent Rs.349 From HDFC Bank A/C *1234 To SWIGGY On 12/11/26 Ref 412345678901")!!.fromApp)
+        assertEquals(SkipReason.NOT_FROM_BANK, reason("Get Rs 100 credited to your wallet on first order", "AD-RANDOM"))
+        assertTrue(SmsParser.classify("AD-RANDOM", "Get Rs 100 credited to your wallet on first order", lenient = true) is ParseResult.Ok)
+    }
 }

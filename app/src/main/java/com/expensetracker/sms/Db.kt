@@ -16,7 +16,7 @@ object DataBus {
     fun bump() = version.update { it + 1 }
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 3) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 4) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -52,12 +52,60 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         db.execSQL("CREATE TABLE rules(merchant TEXT PRIMARY KEY, category TEXT NOT NULL)")
         upgradeToV2(db)
         upgradeToV3(db)
+        upgradeToV4(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) upgradeToV2(db)
         if (oldVersion < 3) upgradeToV3(db)
+        if (oldVersion < 4) upgradeToV4(db)
     }
+
+    /** v4: where each transaction came from (bank vs payment app) and the skipped-SMS list. */
+    private fun upgradeToV4(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE txns ADD COLUMN source TEXT")
+        db.execSQL("CREATE TABLE IF NOT EXISTS skipped(key TEXT PRIMARY KEY, sender TEXT NOT NULL, body TEXT NOT NULL, ts INTEGER NOT NULL, reason TEXT NOT NULL)")
+        db.rawQuery("SELECT id, sms_key FROM txns WHERE sms_key IS NOT NULL", null).use { c ->
+            while (c.moveToNext()) {
+                val kind = Banks.senderKind(c.getString(1).substringBefore('|'))
+                val cv = ContentValues().apply { put("source", if (kind == SenderKind.APP) "app" else "bank") }
+                db.update("txns", cv, "id=?", arrayOf(c.getLong(0).toString()))
+            }
+        }
+    }
+
+    fun addSkipped(key: String, sender: String, body: String, ts: Long, reason: SkipReason) {
+        val cv = ContentValues().apply {
+            put("key", key); put("sender", sender); put("body", body); put("ts", ts); put("reason", reason.name)
+        }
+        writableDatabase.insertWithOnConflict("skipped", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    fun skipped(limit: Int = 300): List<SkippedSms> =
+        readableDatabase.rawQuery("SELECT key, sender, body, ts, reason FROM skipped ORDER BY ts DESC LIMIT $limit", null).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val reason = SkipReason.entries.firstOrNull { it.name == c.getString(4) } ?: continue
+                    add(SkippedSms(c.getString(0), c.getString(1), c.getString(2), c.getLong(3), reason))
+                }
+            }
+        }
+
+    fun deleteSkipped(key: String) {
+        writableDatabase.delete("skipped", "key=?", arrayOf(key))
+    }
+
+    fun clearSkipped() {
+        writableDatabase.delete("skipped", null, null)
+    }
+
+    /** Keep the skipped list small: drop entries older than [days]. */
+    fun pruneSkipped(days: Int = 120) {
+        val cutoff = System.currentTimeMillis() - days * 86_400_000L
+        writableDatabase.delete("skipped", "ts<?", arrayOf(cutoff.toString()))
+    }
+
+    fun deleteTxn(id: Long) = delete(id)
 
     /** v3: bank / account type / balance per transaction, account nicknames, smarter categories. */
     private fun upgradeToV3(db: SQLiteDatabase) {
@@ -243,6 +291,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         put("bank", bank)
         put("acct_type", acctType?.name)
         put("balance", balance)
+        put("source", source)
     }
 
     private fun Cursor.toTxn() = Txn(
@@ -260,6 +309,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         bank = getString(getColumnIndexOrThrow("bank")),
         acctType = getString(getColumnIndexOrThrow("acct_type"))?.let { n -> AcctType.entries.firstOrNull { it.name == n } },
         balance = getColumnIndexOrThrow("balance").let { if (isNull(it)) null else getDouble(it) },
+        source = getString(getColumnIndexOrThrow("source")),
     )
 
     /** Returns -1 if this SMS was already saved. */
@@ -294,6 +344,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         writableDatabase.delete("budgets", null, null)
         writableDatabase.delete("rules", null, null)
         writableDatabase.delete("accounts", null, null)
+        writableDatabase.delete("skipped", null, null)
     }
 
     fun budgets(): Map<String, Double> =

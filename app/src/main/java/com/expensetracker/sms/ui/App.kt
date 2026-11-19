@@ -128,8 +128,9 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
     var budgetEdit by remember { mutableStateOf<BudgetEdit.Of?>(null) }
     var showCategories by rememberSaveable { mutableStateOf(false) }
     var selectedAccount by rememberSaveable { mutableStateOf<String?>(null) }
-    val inSubScreen = (dest == Dest.Settings && showCategories) || (dest == Dest.Accounts && selectedAccount != null)
-    val closeSubScreen = { showCategories = false; selectedAccount = null }
+    var showSkipped by rememberSaveable { mutableStateOf(false) }
+    val inSubScreen = (dest == Dest.Settings && (showCategories || showSkipped)) || (dest == Dest.Accounts && selectedAccount != null)
+    val closeSubScreen = { showCategories = false; showSkipped = false; selectedAccount = null }
     BackHandler(enabled = inSubScreen) { closeSubScreen() }
     val snack = remember { SnackbarHostState() }
     val s = vm.state
@@ -154,6 +155,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                     Text(
                         when {
                             dest == Dest.Settings && showCategories -> "Categories"
+                            dest == Dest.Settings && showSkipped -> "Skipped messages"
                             dest == Dest.Accounts && selectedAccount != null ->
                                 s.accounts.firstOrNull { it.key == selectedAccount }?.let { it.nickname ?: it.bank } ?: "Account"
                             dest == Dest.Home -> "Overview"
@@ -220,6 +222,9 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                 Dest.Budget -> BudgetScreen(s, onEdit = { budgetEdit = BudgetEdit.Of(it) })
                 Dest.Settings -> if (showCategories) {
                     CategoriesScreen(onSave = vm::saveCategory, onDelete = vm::deleteCategory)
+                } else if (showSkipped) {
+                    LaunchedEffect(Unit) { vm.loadSkipped() }
+                    SkippedScreen(vm.skipped, onAdd = vm::addSkippedAsTxn, onDismiss = vm::dismissSkipped, onClearAll = vm::clearSkipped)
                 } else SettingsScreen(
                     onRescan = { vm.importSms(firstTime = false) },
                     onExport = {
@@ -238,6 +243,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                     myNames = vm.myNames,
                     onSaveNames = vm::saveMyNames,
                     onDetectSelf = vm::detectSelfTransfers,
+                    onOpenSkipped = { showSkipped = true },
                 )
             }
         }

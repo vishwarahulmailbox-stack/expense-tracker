@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.MarkEmailUnread
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material3.OutlinedTextField
@@ -62,6 +63,7 @@ fun SettingsScreen(
     myNames: String = "",
     onSaveNames: (String) -> Unit = {},
     onDetectSelf: () -> Unit = {},
+    onOpenSkipped: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var confirmClear by remember { mutableStateOf(false) }
@@ -106,6 +108,8 @@ fun SettingsScreen(
         item {
             SettingsGroup("Data") {
                 SettingsRow(Icons.Rounded.Refresh, "Scan SMS again", "Look for missed transactions in the last 90 days", onClick = onRescan)
+                Divider()
+                SettingsRow(Icons.Rounded.MarkEmailUnread, "Skipped messages", "Money SMS that weren't counted, and why", onClick = onOpenSkipped)
                 Divider()
                 SettingsRow(Icons.Rounded.FileDownload, "Export to CSV", "Open in Excel or Google Sheets", onClick = onExport)
                 Divider()

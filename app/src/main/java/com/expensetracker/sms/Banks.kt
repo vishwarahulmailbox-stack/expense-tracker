@@ -10,6 +10,9 @@ enum class AcctType(val label: String) {
 
 data class BankInfo(val name: String, val start: Long, val end: Long)
 
+/** Who sent an SMS: a bank/card issuer, a payment or shopping app, or someone else. */
+enum class SenderKind { BANK, APP, OTHER }
+
 /** Recognises Indian banks / card issuers from the SMS sender ID or text. */
 object Banks {
     // Order matters: more specific codes first.
@@ -71,6 +74,22 @@ object Banks {
         0xFF37474F to 0xFF1C262B, 0xFF4527A0 to 0xFF231450, 0xFF00695C to 0xFF00352E,
         0xFF6A1B9A to 0xFF350D4D, 0xFF283593 to 0xFF141B4A,
     )
+
+    /** Payment / shopping apps whose "you paid ₹X" SMS usually duplicate the bank's SMS. */
+    private val appCodes = listOf(
+        "PHONPE", "PHNPE", "PHONEPE", "GPAY", "GOOGLE", "AMAZON", "AMZN", "MOBIKW", "FRCHRG", "FREECH",
+        "CRED", "SWIGGY", "ZOMATO", "UBER", "OLACAB", "FLPKRT", "FLIPKT", "MYNTRA", "SUPRYM", "NAVIAP",
+        "POPCLB", "JIOPAY", "BHRTPE", "BHARPE", "PAYZAP", "BLINKT", "ZEPTO", "BIGBSK", "IRCTC", "MMTRIP",
+        "PAYTM",
+    )
+
+    fun senderKind(sender: String): SenderKind {
+        val code = SmsParser.senderName(sender).uppercase()
+        if (code.contains("PAYTMB") || code.contains("PYTMBK")) return SenderKind.BANK // Paytm Payments Bank
+        if (appCodes.any { code.contains(it) }) return SenderKind.APP
+        if (bySender.any { code.contains(it.first) }) return SenderKind.BANK
+        return SenderKind.OTHER
+    }
 
     fun identify(sender: String, body: String): BankInfo {
         val code = SmsParser.senderName(sender).uppercase()

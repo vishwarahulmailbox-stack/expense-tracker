@@ -130,6 +130,17 @@ class ScreenshotTest {
     @Test fun addSheet() = shot("7_add_sheet") { AddTxnContent(onSave = {}) }
     @Test fun accounts() = shot("10_accounts") { WithMonth { AccountsScreen(state, null, {}, {}, { _, _ -> }) } }
     @Test fun accountDetail() = shot("10b_account_detail") { WithMonth { AccountsScreen(state, state.accounts[0].key, {}, {}, { _, _ -> }) } }
+    @Test fun skipped() = shot("11_skipped") {
+        com.expensetracker.sms.ui.SkippedScreen(
+            listOf(
+                SkippedSms("a", "VM-HDFCBK", "Your HDFC Bank Credit Card bill of Rs.12,345 is due on 25-Nov-26. Pay now to avoid charges.", ts(0, 9), SkipReason.REMINDER),
+                SkippedSms("b", "JD-ICICIT", "Txn of Rs 2,499 at Amazon using ICICI Bank Card XX4321 has been declined due to insufficient limit.", ts(1, 14), SkipReason.FAILED),
+                SkippedSms("c", "AX-AXISBK", "Congratulations! You are eligible for a pre-approved personal loan of up to Rs 5,00,000. Apply now.", ts(2, 11), SkipReason.PROMO),
+                SkippedSms("d", "VM-HDFCBK", "Your e-mandate for Rs 5000 towards Groww SIP has been successfully registered.", ts(3, 10), SkipReason.MANDATE_SETUP),
+            ),
+            {}, {}, {},
+        )
+    }
     @Test fun categories() = shot("9_categories") { CategoriesScreen({ _, _ -> }, {}) }
     @Test fun categoryEditor() = shot("9b_category_editor") { CategoryEditorContent(null, CatType.EXPENSE, { _, _ -> }) }
     @Test fun budgetSheet() = shot("8_budget_sheet") {

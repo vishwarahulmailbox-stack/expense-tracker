@@ -252,6 +252,15 @@ def train(data):
             b = bucket(f)
             counts[b][cat] += 1
             totals[cat] += 1
+    # Scale every class to the same total, so a small class (few, short messages) doesn't win
+    # just because unknown words cost it less. Only scales up, so no count rounds to zero.
+    target = max(totals.values())
+    for c in list(totals):
+        f = target / totals[c]
+        for row in counts.values():
+            if c in row:
+                row[c] *= f
+        totals[c] = target
     return counts, totals, docs
 
 def scores(model, body):

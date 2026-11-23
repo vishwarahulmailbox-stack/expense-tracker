@@ -26,9 +26,11 @@ class CategoryModel private constructor(
     private val cls: ShortArray,
     private val cnt: FloatArray,
     private val featurizer: (String) -> List<String> = ::features,
+    /** Ignore features the model never saw (else small classes win on unknown words). */
+    private val skipUnseen: Boolean = false,
 ) {
     companion object {
-        fun read(input: InputStream, featurizer: (String) -> List<String> = ::features): CategoryModel {
+        fun read(input: InputStream, featurizer: (String) -> List<String> = ::features, skipUnseen: Boolean = false): CategoryModel {
             val d = DataInputStream(input.buffered())
             val magic = ByteArray(4).also { d.readFully(it) }
             require(String(magic) == "ETCM") { "Not a category model" }
@@ -60,7 +62,7 @@ class CategoryModel private constructor(
             val start = IntArray(buckets + 1)
             for (b in bucketOf) start[b + 1]++
             for (i in 1..buckets) start[i] += start[i - 1]
-            return CategoryModel(buckets, alpha, temp, names, docs, totals, start, cls, cnt, featurizer)
+            return CategoryModel(buckets, alpha, temp, names, docs, totals, start, cls, cnt, featurizer, skipUnseen)
         }
 
         fun normalize(s: String) = s.lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex(" +"), " ").trim()
@@ -135,6 +137,7 @@ class CategoryModel private constructor(
         }
         val row = FloatArray(classes.size)
         for (b in feats) {
+            if (skipUnseen && start[b] == start[b + 1] && user == null) continue
             row.fill(0f)
             for (i in start[b] until start[b + 1]) row[cls[i].toInt()] = cnt[i]
             for (c in 0 until k) {
@@ -211,11 +214,18 @@ object CategoryAI {
             .getOrNull()?.also { smsModel = it }
     }
 
+    private val cueWords = mapOf(
+        "ATM/Cash" to Regex("""\b(atm|cash|withdrawn|withdrawal|wdl|nfs)\b""", RegexOption.IGNORE_CASE),
+        "Charges & fees" to Regex("""\b(fee|fees|charge|charges|gst|penalty|amc)\b""", RegexOption.IGNORE_CASE),
+    )
+
     /** What the whole SMS suggests. Empty when the SMS itself says nothing about the purchase. */
     fun predictSms(ctx: Context, body: String): List<Pair<String, Double>> {
         val m = smsModel(ctx) ?: return emptyList()
         val raw = synchronized(this) { m.predict(body) }
         if (raw.firstOrNull()?.first == Categories.OTHERS) return emptyList()
+        // Cash and fees only when the SMS actually says so.
+        raw.firstOrNull()?.first?.let { top -> cueWords[top]?.let { if (!it.containsMatchIn(body)) return emptyList() } }
         val valid = Categories.expense.toSet()
         val keep = raw.filter { it.first in valid && it.first != Categories.SELF && it.first != Categories.OTHERS }
         val z = keep.sumOf { it.second }.takeIf { it > 0 } ?: return emptyList()

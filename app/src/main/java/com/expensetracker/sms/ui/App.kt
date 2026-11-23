@@ -151,16 +151,18 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
         awaitingUpi = null
         vm.onUpiResult(b, res.data?.getStringExtra("response") ?: res.data?.getStringExtra("Status")?.let { "Status=$it" })
     }
-    val launchUpi: (Bill, Double) -> Unit = { b, amount ->
-        val uri = Upi.payUri(b.payeeVpa!!, b.name, amount, "Bill ${b.name}")
+    /** Opens the UPI payment screen; [pkg] = a specific app, null = let the user choose. */
+    val launchUpiIn: (Bill, Double, String?) -> Unit = { b, amount, pkg ->
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(Upi.payUri(b.payeeVpa!!, b.name, amount, "Bill ${b.name}")))
         awaitingUpi = b
         try {
-            upiLauncher.launch(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(uri)), "Pay with"))
+            upiLauncher.launch(if (pkg != null) intent.setPackage(pkg) else Intent.createChooser(intent, "Pay with"))
         } catch (e: ActivityNotFoundException) {
             awaitingUpi = null
             payBill = b
         }
     }
+    val launchUpi: (Bill, Double) -> Unit = { b, amount -> launchUpiIn(b, amount, null) }
     // One tap: straight to the UPI app if we know the payee, otherwise the pay sheet.
     val pay: (Bill) -> Unit = { b ->
         val vpa = b.payeeVpa
@@ -338,6 +340,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
             onDismiss = { payBill = null },
             onPayUpi = { bill, amount -> payBill = null; launchUpi(bill, amount) },
             onSaveVpa = { bill, vpa -> vm.saveBill(bill.copy(payeeVpa = vpa)) },
+            onPayInApp = { bill, amount, pkg -> payBill = null; launchUpiIn(bill, amount, pkg) },
         )
     }
 

@@ -253,27 +253,60 @@ fun BillEditorContent(bill: Bill?, onSave: (Bill) -> Unit, onDelete: (Bill) -> U
 
 /** Shown when "Pay now" can't go straight to UPI: add the payee's UPI ID, or pay inside a UPI app. */
 @Composable
-fun PaySheet(bill: Bill, onDismiss: () -> Unit, onPayUpi: (Bill, Double) -> Unit, onSaveVpa: (Bill, String) -> Unit) {
-    BillSheetFrame(onDismiss) { PayContent(bill, onPayUpi, onSaveVpa, onDismiss) }
+fun PaySheet(
+    bill: Bill,
+    onDismiss: () -> Unit,
+    onPayUpi: (Bill, Double) -> Unit,
+    onSaveVpa: (Bill, String) -> Unit,
+    onPayInApp: (Bill, Double, String) -> Unit,
+) {
+    BillSheetFrame(onDismiss) { PayContent(bill, onPayUpi, onSaveVpa, onDismiss, onPayInApp) }
 }
 
 data class UpiApp(val label: String, val pkg: String, val icon: android.graphics.drawable.Drawable?)
 
+/** Popular UPI apps first, in this order; anything else that handles upi://pay after them. */
+private val knownUpiApps = listOf(
+    "com.google.android.apps.nbu.paisa.user", "com.phonepe.app", "net.one97.paytm", "in.org.npci.upiapp",
+    "com.dreamplug.androidapp", "in.amazon.mShop.android.shopping", "money.super.payments", "com.naviapp",
+    "com.mobikwik_new", "com.freecharge.android", "com.myairtelapp", "com.whatsapp", "com.fampay.in",
+    "com.jupiter.money", "com.slice.android", "com.sbi.lotusintouch", "com.csam.icici.bank.imobile",
+    "com.axis.mobile", "com.snapwork.hdfc", "com.msf.kbank.mobile", "com.bankofbaroda.mconnect",
+    "com.infrasofttech.indianBank", "com.unionbank.ecommerce.mobile.android", "com.fss.unbipsp",
+)
+
+/** Installed apps that can pay a UPI link: everything answering upi://pay plus well-known UPI apps. */
+fun installedUpiApps(ctx: android.content.Context): List<UpiApp> = runCatching {
+    val pm = ctx.packageManager
+    val flags = if (android.os.Build.VERSION.SDK_INT >= 23) PackageManager.MATCH_ALL else 0
+    val viaIntent = pm.queryIntentActivities(Intent(Intent.ACTION_VIEW, Uri.parse("upi://pay?pa=test@upi&pn=Test&am=1.00&cu=INR")), flags)
+        .map { it.activityInfo.packageName }
+    val known = knownUpiApps.filter { pm.getLaunchIntentForPackage(it) != null }
+    // WhatsApp/Amazon only count if they really answer UPI links or are well known UPI apps
+    val all = (known + viaIntent).distinct()
+    all.sortedBy { knownUpiApps.indexOf(it).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+        .mapNotNull { pkg ->
+            runCatching {
+                val info = pm.getApplicationInfo(pkg, 0)
+                UpiApp(pm.getApplicationLabel(info).toString(), pkg, pm.getApplicationIcon(info))
+            }.getOrNull()
+        }
+}.getOrDefault(emptyList())
+
 @Composable
-fun PayContent(bill: Bill, onPayUpi: (Bill, Double) -> Unit, onSaveVpa: (Bill, String) -> Unit, onDone: () -> Unit = {}) {
+fun PayContent(
+    bill: Bill,
+    onPayUpi: (Bill, Double) -> Unit,
+    onSaveVpa: (Bill, String) -> Unit,
+    onDone: () -> Unit = {},
+    onPayInApp: (Bill, Double, String) -> Unit = { b, a, _ -> onPayUpi(b, a) },
+) {
     val ctx = LocalContext.current
     var vpa by remember { mutableStateOf(bill.payeeVpa ?: "") }
     var amountText by remember { mutableStateOf(bill.amount.plain()) }
     val vpaError = Upi.validate(vpa)
     val amount = amountText.toDoubleOrNull()
-    val apps = remember {
-        runCatching {
-            val pm = ctx.packageManager
-            pm.queryIntentActivities(Intent(Intent.ACTION_VIEW, Uri.parse("upi://pay")), PackageManager.MATCH_DEFAULT_ONLY)
-                .map { UpiApp(it.loadLabel(pm).toString(), it.activityInfo.packageName, it.loadIcon(pm)) }
-                .distinctBy { it.pkg }
-        }.getOrDefault(emptyList())
-    }
+    val apps = remember { installedUpiApps(ctx) }
 
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -317,14 +350,21 @@ fun PayContent(bill: Bill, onPayUpi: (Bill, Double) -> Unit, onSaveVpa: (Bill, S
         }
 
         if (apps.isNotEmpty()) {
-            FieldLabel("Or pay inside a UPI app (Bill payments / BBPS)")
+            FieldLabel(if (vpa.isNotBlank() && vpaError == null) "Or pick an app to pay with" else "Or pay inside a UPI app (Bill payments / BBPS)")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 apps.forEach { app ->
                     Column(
                         Modifier.width(76.dp).clip(RoundedCornerShape(14.dp))
                             .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(14.dp))
                             .clickable {
-                                ctx.packageManager.getLaunchIntentForPackage(app.pkg)?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                                val canPay = vpa.isNotBlank() && vpaError == null && amount != null && amount > 0
+                                if (canPay) {
+                                    // Straight to this app's payment screen with payee + amount filled in
+                                    if (vpa != bill.payeeVpa) onSaveVpa(bill, vpa)
+                                    onPayInApp(bill.copy(payeeVpa = vpa), amount ?: bill.amount, app.pkg)
+                                } else {
+                                    ctx.packageManager.getLaunchIntentForPackage(app.pkg)?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                                }
                                 onDone()
                             }
                             .padding(vertical = 10.dp),

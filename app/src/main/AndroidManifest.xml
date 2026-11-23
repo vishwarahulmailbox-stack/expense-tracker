@@ -9,10 +9,40 @@
 
     <!-- To list installed UPI apps for "Pay now" (package visibility, Android 11+) -->
     <queries>
+        <!-- UPI apps register "upi://pay" (with the "pay" host); scheme alone doesn't match them -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="upi" android:host="pay" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="upi" />
         </intent>
+        <!-- Well-known UPI apps, so they show up even if their link filter differs -->
+        <package android:name="com.google.android.apps.nbu.paisa.user" />
+        <package android:name="com.phonepe.app" />
+        <package android:name="net.one97.paytm" />
+        <package android:name="in.org.npci.upiapp" />
+        <package android:name="com.dreamplug.androidapp" />
+        <package android:name="in.amazon.mShop.android.shopping" />
+        <package android:name="com.mobikwik_new" />
+        <package android:name="com.freecharge.android" />
+        <package android:name="com.myairtelapp" />
+        <package android:name="com.whatsapp" />
+        <package android:name="money.super.payments" />
+        <package android:name="com.naviapp" />
+        <package android:name="com.sbi.lotusintouch" />
+        <package android:name="com.csam.icici.bank.imobile" />
+        <package android:name="com.axis.mobile" />
+        <package android:name="com.snapwork.hdfc" />
+        <package android:name="com.msf.kbank.mobile" />
+        <package android:name="com.unionbank.ecommerce.mobile.android" />
+        <package android:name="com.fss.unbipsp" />
+        <package android:name="com.infrasofttech.indianBank" />
+        <package android:name="com.bankofbaroda.mconnect" />
+        <package android:name="com.fampay.in" />
+        <package android:name="com.jupiter.money" />
+        <package android:name="com.slice.android" />
     </queries>
 
     <application

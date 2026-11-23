@@ -173,6 +173,11 @@ class ScreenshotTest {
         TxnEditorContent(txns[0].copy(merchant = "Kabir Store", category = "Groceries", aiConf = 0.70), { _, _ -> }, {}, {},
             listOf("Groceries" to 0.70, "Shopping" to 0.29, "Health" to 0.01))
     }
+    @Test fun homeIncomeHidden() = shot("1d_home_income_hidden") {
+        androidx.compose.runtime.CompositionLocalProvider(com.expensetracker.sms.ui.LocalIncomeHidden provides true) {
+            WithMonth { HomeScreen(state, {}, {}, {}) }
+        }
+    }
     @Test fun categories() = shot("9_categories") { CategoriesScreen({ _, _ -> }, {}) }
     @Test fun categoryEditor() = shot("9b_category_editor") { CategoryEditorContent(null, CatType.EXPENSE, { _, _ -> }) }
     @Test fun budgetSheet() = shot("8_budget_sheet") {

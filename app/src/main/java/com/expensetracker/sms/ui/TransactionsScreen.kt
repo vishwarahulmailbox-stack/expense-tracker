@@ -127,7 +127,7 @@ fun TransactionsScreen(s: UiState, onTxn: (Txn) -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                if (received > 0) Text("+${fmt(received)}  ", style = MaterialTheme.typography.labelLarge, color = AppColors.income)
+                if (received > 0) Text("+${incomeAmount(received)}  ", style = MaterialTheme.typography.labelLarge, color = AppColors.income)
                 if (spent > 0) Text("−${fmt(spent)}", style = MaterialTheme.typography.labelLarge)
             }
         }

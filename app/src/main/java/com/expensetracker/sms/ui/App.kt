@@ -12,6 +12,11 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.expensetracker.sms.Txn
 import android.content.ActivityNotFoundException
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.rounded.EventNote
@@ -108,7 +113,32 @@ fun App(vm: AppViewModel = viewModel(), launch: LaunchRequest? = null, onLaunchH
         )
     } else {
         LaunchedEffect(Unit) { vm.importIfFirstRun() }
-        MainScaffold(vm, onPrivacy = { showPrivacy = true }, launch = launch, onLaunchHandled = onLaunchHandled)
+        val activity = ctx.findActivity()
+        var noLock by remember { mutableStateOf(false) }
+        // Lock income again whenever the app leaves the screen.
+        LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.lockIncome() }
+        val reveal: (() -> Unit) -> Unit = { then ->
+            if (!vm.incomeLocked) then()
+            else if (activity == null) noLock = true
+            else unlockWithDeviceLock(activity, onSuccess = { vm.unlockIncome(); then() }, onNoScreenLock = { noLock = true })
+        }
+        CompositionLocalProvider(LocalIncomeHidden provides vm.incomeLocked, LocalRevealIncome provides reveal) {
+            MainScaffold(vm, onPrivacy = { showPrivacy = true }, launch = launch, onLaunchHandled = onLaunchHandled)
+        }
+        if (noLock) {
+            AlertDialog(
+                onDismissRequest = { noLock = false },
+                title = { Text("Set a screen lock") },
+                text = { Text("Income is protected by your phone's screen lock. Set a PIN, pattern or fingerprint in phone Settings to view it.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        noLock = false
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }) { Text("Open Settings") }
+                },
+                dismissButton = { TextButton(onClick = { noLock = false }) { Text("Not now") } },
+            )
+        }
     }
     if (showPrivacy) PrivacyDialog { showPrivacy = false }
 }
@@ -140,6 +170,10 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
     val closeSubScreen = { showCategories = false; showSkipped = false; selectedAccount = null }
     BackHandler(enabled = inSubScreen) { closeSubScreen() }
     val snack = remember { SnackbarHostState() }
+    val hidden = LocalIncomeHidden.current
+    val reveal = LocalRevealIncome.current
+    /** Credits (income) open only after the screen lock when income is hidden. */
+    val openTxn: (Txn) -> Unit = { t -> if (!t.isDebit && hidden) reveal { editing = t } else editing = t }
 
     // ---- Bills: edit / add / pay
     var editingBill by remember { mutableStateOf<Bill?>(null) }
@@ -266,7 +300,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
             when (dest) {
                 Dest.Home -> HomeScreen(
                     s,
-                    onTxn = { editing = it },
+                    onTxn = openTxn,
                     onSeeAll = { dest = Dest.Txns },
                     onOpenBudgets = { dest = Dest.Budget },
                     onOpenBills = { dest = Dest.Bills },
@@ -274,7 +308,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     reviewCount = vm.reviewQueue.size,
                     onReview = { reviewing = true },
                 )
-                Dest.Txns -> TransactionsScreen(s, onTxn = { editing = it })
+                Dest.Txns -> TransactionsScreen(s, onTxn = openTxn)
                 Dest.Bills -> BillsScreen(
                     s.bills,
                     s.month,
@@ -286,7 +320,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     s,
                     selectedKey = selectedAccount,
                     onSelect = { selectedAccount = it },
-                    onTxn = { editing = it },
+                    onTxn = openTxn,
                     onRename = vm::renameAccount,
                 )
                 Dest.Budget -> BudgetScreen(s, onEdit = { budgetEdit = BudgetEdit.Of(it) })
@@ -297,7 +331,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     SkippedScreen(vm.skipped, onAdd = vm::addSkippedAsTxn, onDismiss = vm::dismissSkipped, onClearAll = vm::clearSkipped)
                 } else SettingsScreen(
                     onRescan = { vm.importSms(firstTime = false) },
-                    onExport = {
+                    onExport = { reveal {
                         vm.exportCsv { uri ->
                             if (uri == null) return@exportCsv
                             val send = Intent(Intent.ACTION_SEND)
@@ -306,7 +340,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             ctx.startActivity(Intent.createChooser(send, "Export expenses").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
-                    },
+                    } },
                     onClearAll = vm::clearAll,
                     onPrivacy = onPrivacy,
                     onOpenCategories = { showCategories = true },
@@ -316,6 +350,8 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     onOpenSkipped = { showSkipped = true },
                     aiCorrections = vm.aiCorrections.also { LaunchedEffect(Unit) { vm.refreshAiStats() } },
                     onResetAi = vm::resetAi,
+                    hideIncome = vm.hideIncome,
+                    onHideIncome = { on -> if (on) vm.setHideIncomePref(true) else reveal { vm.setHideIncomePref(false) } },
                 )
             }
         }
@@ -353,7 +389,8 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
         EditTxnSheet(
             txn = t,
             onDismiss = { editing = null },
-            onSave = { nt, applyAll -> vm.updateTxn(nt, applyAll); editing = null },
+            onPersist = { vm.liveUpdate(t, it) },
+            onDone = { final, rule -> vm.finishEdit(t, final, rule) },
             onDelete = { vm.deleteTxn(t); editing = null },
             onCreateCategory = { vm.saveCategory(it, null) },
             aiTop = remember(t.id) { if (t.isDebit) vm.aiTop(t.merchant) else emptyList() },

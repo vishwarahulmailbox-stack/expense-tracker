@@ -46,6 +46,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var myNames by mutableStateOf(SelfTransfer.namesText(app))
         private set
 
+    // ---- Income privacy: hidden until the phone's screen lock is used; locks again when the app leaves the screen.
+    var hideIncome by mutableStateOf(prefs.getBoolean("hide_income", true))
+        private set
+    var incomeUnlocked by mutableStateOf(false)
+        private set
+    val incomeLocked: Boolean get() = hideIncome && !incomeUnlocked
+
+    fun unlockIncome() { incomeUnlocked = true }
+    fun lockIncome() { incomeUnlocked = false }
+    fun setHideIncomePref(on: Boolean) {
+        hideIncome = on
+        prefs.edit().putBoolean("hide_income", on).apply()
+    }
+
     var skipped by mutableStateOf<List<SkippedSms>>(emptyList())
         private set
 
@@ -147,24 +161,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateTxn(edited0: Txn, applyToMerchant: Boolean) {
-        val before = state.txns.firstOrNull { it.id == edited0.id }
-        val changed = before != null && before.category != edited0.category
-        // Teach the on-device model: a change is a correction, saving an AI pick unchanged confirms it.
-        if (changed) viewModelScope.launch(Dispatchers.IO) { CategoryAI.learn(getApplication(), edited0.merchant, edited0.category, 1f) }
-        else if (before?.aiConf != null && !before.aiReviewed) viewModelScope.launch(Dispatchers.IO) {
-            CategoryAI.learn(getApplication(), edited0.merchant, edited0.category, 0.5f)
-        }
-        val edited = if (changed || before?.aiConf != null) edited0.copy(aiReviewed = true, aiConf = if (changed) null else edited0.aiConf) else edited0
-        val t = when {
-            edited.category == Categories.SELF -> edited.copy(ignored = true)
-            before != null && before.category == Categories.SELF && before.ignored == edited.ignored -> edited.copy(ignored = false)
-            else -> edited
-        }
+    /** Self transfers are never counted; leaving Self transfer counts the transaction again. */
+    private fun normalized(original: Txn, e: Txn): Txn = when {
+        e.category == Categories.SELF -> e.copy(ignored = true)
+        original.category == Categories.SELF && e.ignored == original.ignored -> e.copy(ignored = false)
+        else -> e
+    }
+
+    /** Auto-save while the edit sheet is open (no learning yet). */
+    fun liveUpdate(original: Txn, edited: Txn) = io { db.update(normalized(original, edited)) }
+
+    /** The edit sheet closed: save the final state, apply "always use" and teach the AI once. */
+    fun finishEdit(original: Txn, final0: Txn, applyToMerchant: Boolean) {
+        if (final0 == original) return
+        val changed = original.category != final0.category
+        val final = if (changed) final0.copy(aiReviewed = true, aiConf = null) else final0
+        val t = normalized(original, final)
         io {
             db.update(t)
-            // Learn only when the category actually changed, so a note edit doesn't lock a merchant.
-            if (applyToMerchant && before?.category != t.category) db.setRule(t.merchant, t.category)
+            if (changed) {
+                CategoryAI.learn(getApplication(), t.merchant, t.category, 1f)
+                // Learn only when the category actually changed, so a note edit doesn't lock a merchant.
+                if (applyToMerchant) db.setRule(t.merchant, t.category)
+            }
         }
     }
 

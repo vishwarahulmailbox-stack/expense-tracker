@@ -25,6 +25,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.AssistChip
@@ -190,18 +193,31 @@ private val fullFmt = DateTimeFormatter.ofPattern("EEE, d MMM yyyy · h:mm a", L
 fun EditTxnSheet(
     txn: Txn,
     onDismiss: () -> Unit,
-    onSave: (Txn, Boolean) -> Unit,
+    /** Saves the current edits right away (debounced while typing). */
+    onPersist: (Txn) -> Unit,
+    /** Called once when the sheet closes: final state + "always use" choice (for rules & AI learning). */
+    onDone: (Txn, Boolean) -> Unit,
     onDelete: () -> Unit,
     onCreateCategory: (CategoryDef) -> Unit,
     aiTop: List<Pair<String, Double>> = emptyList(),
 ) {
-    Sheet(onDismiss) { TxnEditorContent(txn, onSave, onDelete, onCreateCategory, aiTop) }
+    var latest by remember { mutableStateOf(txn) }
+    var rule by remember { mutableStateOf(txn.smsKey != null) }
+    LaunchedEffect(latest) {
+        if (latest != txn) {
+            delay(400)
+            onPersist(latest)
+        }
+    }
+    Sheet(onDismiss = { onDone(latest, rule); onDismiss() }) {
+        TxnEditorContent(txn, onChange = { t, r -> latest = t; rule = r }, onDelete, onCreateCategory, aiTop)
+    }
 }
 
 @Composable
 fun TxnEditorContent(
     txn: Txn,
-    onSave: (Txn, Boolean) -> Unit,
+    onChange: (Txn, Boolean) -> Unit,
     onDelete: () -> Unit,
     onCreateCategory: (CategoryDef) -> Unit = {},
     aiTop: List<Pair<String, Double>> = emptyList(),
@@ -214,6 +230,13 @@ fun TxnEditorContent(
     var applyRule by remember { mutableStateOf(txn.smsKey != null) }
     var showSms by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val initialRule = remember { applyRule }
+
+    // No Save button: every change is reported straight away.
+    val current = txn.copy(merchant = merchant.trim().ifBlank { txn.merchant }, category = category, note = note.trim(), ignored = ignored)
+    LaunchedEffect(current, applyRule) {
+        if (current != txn || applyRule != initialRule) onChange(current, applyRule)
+    }
 
     Column(
         Modifier
@@ -228,7 +251,7 @@ fun TxnEditorContent(
             CategoryBadge(category, 56.dp)
             Spacer(Modifier.height(10.dp))
             Text(
-                (if (txn.isDebit) "−" else "+") + fmt(txn.amount),
+                if (txn.isDebit) "−" + fmt(txn.amount) else "+" + incomeAmount(txn.amount),
                 style = MoneyStyle,
                 fontSize = 34.sp,
                 color = if (txn.isDebit) MaterialTheme.colorScheme.onSurface else AppColors.income,
@@ -307,24 +330,24 @@ fun TxnEditorContent(
             }
         }
 
-        Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.CloudDone, null, Modifier.size(16.dp), tint = AppColors.income)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Changes are saved automatically",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
                 onClick = { if (confirmDelete) onDelete() else confirmDelete = true },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                modifier = Modifier.height(52.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
             ) {
                 Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(if (confirmDelete) "Confirm" else "Delete")
+                Spacer(Modifier.width(4.dp))
+                Text(if (confirmDelete) "Tap again to delete" else "Delete")
             }
-            Button(
-                onClick = {
-                    val m = merchant.trim().ifBlank { txn.merchant }
-                    onSave(txn.copy(merchant = m, category = category, note = note.trim(), ignored = ignored), applyRule)
-                },
-                modifier = Modifier.weight(1f).height(52.dp),
-            ) { Text("Save changes") }
         }
     }
     if (creating) {

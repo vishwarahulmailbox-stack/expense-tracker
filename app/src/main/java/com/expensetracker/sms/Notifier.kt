@@ -50,7 +50,12 @@ object Notifier {
     }
 
     fun newTxn(ctx: Context, t: Txn) {
-        val title = if (t.isDebit) "${fmt(t.amount)} spent · ${t.merchant}" else "${fmt(t.amount)} received · ${t.merchant}"
+        val hideIncome = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("hide_income", true)
+        val title = when {
+            t.isDebit -> "${fmt(t.amount)} spent · ${t.merchant}"
+            hideIncome -> "Money received · ${t.merchant}" // amount stays behind the screen lock
+            else -> "${fmt(t.amount)} received · ${t.merchant}"
+        }
         show(ctx, CH_TXN, (t.id % 100000).toInt() + 10, title, "${t.category} · tap to change category")
     }
 

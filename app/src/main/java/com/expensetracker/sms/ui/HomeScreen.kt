@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.material.icons.rounded.SyncAlt
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -163,7 +164,13 @@ private fun HeroCard(s: UiState, onOpenBudgets: () -> Unit) {
                 .background(white.copy(alpha = 0.12f))
                 .padding(vertical = 8.dp),
         ) {
-            HeroStat("Income", fmt(s.income), Modifier.weight(1f))
+            val hidden = LocalIncomeHidden.current
+            val reveal = LocalRevealIncome.current
+            HeroStat(
+                if (hidden) "Income 🔒" else "Income",
+                incomeAmount(s.income),
+                Modifier.weight(1f).then(if (hidden) Modifier.clickable { reveal {} } else Modifier),
+            )
             VLine()
             HeroStat("Daily avg", fmt(Math.round(if (elapsed > 0) s.spent / elapsed else 0.0).toDouble()), Modifier.weight(1f))
             VLine()
@@ -210,7 +217,21 @@ private fun BreakdownCard(s: UiState) {
             }
         }
         Spacer(Modifier.height(12.dp))
-        if (cats.isEmpty()) {
+        if (income && LocalIncomeHidden.current) {
+            val reveal = LocalRevealIncome.current
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { reveal {} }
+                    .background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Income is hidden", style = MaterialTheme.typography.titleSmall)
+                    Text("Tap to unlock with your phone's screen lock", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else if (cats.isEmpty()) {
             Text(
                 if (income) "No income this month" else "No spending this month",
                 style = MaterialTheme.typography.bodySmall,
@@ -333,7 +354,7 @@ fun TxnRow(t: Txn, onClick: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                (if (t.isDebit) "−" else "+") + fmt(t.amount),
+                if (t.isDebit) "−" + fmt(t.amount) else "+" + incomeAmount(t.amount),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = when {

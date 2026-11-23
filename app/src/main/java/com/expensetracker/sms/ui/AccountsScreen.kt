@@ -201,7 +201,7 @@ fun BankCard(a: Account, modifier: Modifier = Modifier) {
                     Text("This month", color = dim, style = MaterialTheme.typography.labelSmall)
                     Text("−${fmt(a.monthSpent)}", color = white, style = MaterialTheme.typography.titleSmall, maxLines = 1)
                     if (a.monthReceived > 0) {
-                        Text("+${fmt(a.monthReceived)}", color = Color(0xFFB9F6CA), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                        Text("+${incomeAmount(a.monthReceived)}", color = Color(0xFFB9F6CA), style = MaterialTheme.typography.labelMedium, maxLines = 1)
                     }
                 }
             }
@@ -224,7 +224,7 @@ private fun AccountDetail(a: Account, txns: List<Txn>, onTxn: (Txn) -> Unit, onR
             AppCard(padding = PaddingValues(vertical = 12.dp)) {
                 Row(Modifier.fillMaxWidth()) {
                     SummaryCell("Spent", fmt(a.monthSpent), Modifier.weight(1f))
-                    SummaryCell("Received", fmt(a.monthReceived), Modifier.weight(1f))
+                    SummaryCell("Received", incomeAmount(a.monthReceived), Modifier.weight(1f))
                     SummaryCell("Transactions", "${a.monthCount}", Modifier.weight(1f))
                 }
                 HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)

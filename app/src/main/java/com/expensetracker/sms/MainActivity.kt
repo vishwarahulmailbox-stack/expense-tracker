@@ -2,7 +2,7 @@ package com.expensetracker.sms
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
@@ -12,7 +12,7 @@ import com.expensetracker.sms.ui.AppTheme
 /** What a notification asked us to open. */
 data class LaunchRequest(val openBills: Boolean, val payBillId: Long?)
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private val launch = mutableStateOf<LaunchRequest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {

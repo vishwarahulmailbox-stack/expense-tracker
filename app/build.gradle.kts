@@ -75,6 +75,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.biometric:biometric:1.1.0")
 
     // Screenshot tests (run on CI with Robolectric, no phone needed)
     testImplementation(bom)

@@ -21,6 +21,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material3.Switch
 import androidx.compose.material.icons.rounded.MarkEmailUnread
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.SyncAlt
@@ -66,6 +68,8 @@ fun SettingsScreen(
     onOpenSkipped: () -> Unit = {},
     aiCorrections: Int = 0,
     onResetAi: () -> Unit = {},
+    hideIncome: Boolean = true,
+    onHideIncome: (Boolean) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var confirmClear by remember { mutableStateOf(false) }
@@ -76,6 +80,26 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { AiPrivacyCard(aiCorrections, onResetAi) }
+        item {
+            SettingsGroup("Privacy") {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onHideIncome(!hideIncome) }.padding(horizontal = 16.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(20.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Hide income", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Show income only after your phone's PIN, pattern or fingerprint. Locks again when you leave the app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = hideIncome, onCheckedChange = { onHideIncome(it) })
+                }
+            }
+        }
         item {
             SettingsGroup("Categories & detection") {
                 SettingsRow(Icons.Rounded.Category, "Categories", "Create your own, change icons and colours", onClick = onOpenCategories)

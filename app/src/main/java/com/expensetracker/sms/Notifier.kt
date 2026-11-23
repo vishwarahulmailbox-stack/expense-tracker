@@ -17,11 +17,15 @@ import java.time.YearMonth
 object Notifier {
     private const val CH_TXN = "txns"
     private const val CH_BUDGET = "budget"
+    private const val CH_BILLS = "bills"
+    const val EXTRA_OPEN_BILLS = "open_bills"
+    const val EXTRA_PAY_BILL = "pay_bill_id"
 
     private fun ensureChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_TXN, "New transactions", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CH_BUDGET, "Budget alerts", NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(NotificationChannel(CH_BILLS, "Bill reminders", NotificationManager.IMPORTANCE_HIGH))
     }
 
     @SuppressLint("MissingPermission")
@@ -51,6 +55,38 @@ object Notifier {
     }
 
     fun budget(ctx: Context, id: Int, title: String, text: String) = show(ctx, CH_BUDGET, id, title, text)
+
+    /** Bill reminder with a "Pay now" action (opens the app, which opens the UPI app). */
+    @SuppressLint("MissingPermission")
+    fun billReminder(ctx: Context, bill: Bill, title: String, text: String) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        ensureChannels(ctx)
+        val id = 50_000 + (bill.id % 100_000).toInt()
+        val open = PendingIntent.getActivity(
+            ctx, id, Intent(ctx, MainActivity::class.java).putExtra(EXTRA_OPEN_BILLS, true),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val b = NotificationCompat.Builder(ctx, CH_BILLS)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+        if (!bill.autopay) {
+            val pay = PendingIntent.getActivity(
+                ctx, id + 1, Intent(ctx, MainActivity::class.java).putExtra(EXTRA_PAY_BILL, bill.id),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            b.addAction(0, "Pay now", pay)
+        }
+        NotificationManagerCompat.from(ctx).notify(id, b.build())
+    }
+
+    fun billPaid(ctx: Context, bill: Bill, t: Txn) =
+        show(ctx, CH_BILLS, 60_000 + (bill.id % 100_000).toInt(), "✅ ${bill.name} paid", "${fmt(t.amount)} payment detected and marked as paid.")
 }
 
 object BudgetAlerts {

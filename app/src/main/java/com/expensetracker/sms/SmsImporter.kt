@@ -23,10 +23,12 @@ object SmsImporter {
         names: List<String> = SelfTransfer.myNames(ctx),
         known: Set<String> = Db.get(ctx).knownAccounts(),
     ): Boolean {
+        // Bill / statement / upcoming auto-debit? (OTPs and personal messages are ignored inside.)
+        val isBill = runCatching { BillEngine.onBillSms(ctx, addr, body, toLocalDate(ts), key(addr, body)) }.getOrDefault(false)
         when (val r = SmsParser.classify(addr, body)) {
             is ParseResult.Skip -> {
                 // OTPs and personal messages are never stored. Others are kept for review if they mention money.
-                if (r.reason.keep && SmsParser.hasAmount(body)) {
+                if (!isBill && r.reason.keep && SmsParser.hasAmount(body)) {
                     Db.get(ctx).addSkipped(key(addr, body), addr, body, ts, r.reason)
                 }
                 return false
@@ -93,6 +95,7 @@ object SmsImporter {
         if (!p.fromApp) {
             Dedupe.appCopies(db, t).forEach { app ->
                 t = Dedupe.merge(db, t, app)
+                db.repointBillTxn(app.id, t.id)
                 db.deleteTxn(app.id)
             }
         }
@@ -103,6 +106,12 @@ object SmsImporter {
                 db.update(SelfTransfer.mark(pair))
                 t = SelfTransfer.mark(t)
             }
+        }
+        // Did this payment settle a bill (incl. autopay / NACH)?
+        val paidBill = if (t.isDebit) runCatching { BillEngine.onNewTxn(ctx, t) }.getOrNull() else null
+        if (paidBill != null) {
+            db.txn(t.id)?.let { t = it }
+            if (notify) Notifier.billPaid(ctx, paidBill, t)
         }
         // App SMS don't notify: the bank SMS that usually follows will.
         if (notify && !p.fromApp && t.category != Categories.SELF) {

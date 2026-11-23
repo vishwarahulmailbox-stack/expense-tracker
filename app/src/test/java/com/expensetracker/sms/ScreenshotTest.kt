@@ -87,8 +87,22 @@ class ScreenshotTest {
         )
     }.sortedBy { it.type.ordinal }
 
+    private val bills = listOf(
+        Bill(id = 1, series = "a", name = "HDFC Bank Credit Card", kind = BillKind.CREDIT_CARD, amount = 12345.0, minDue = 620.0,
+            dueDate = LocalDate.now().plusDays(2), recurrence = Recurrence.MONTHLY, last4 = "4321"),
+        Bill(id = 2, series = "b", name = "BESCOM", kind = BillKind.ELECTRICITY, amount = 1250.0, dueDate = LocalDate.now().minusDays(1),
+            recurrence = Recurrence.MONTHLY, payeeVpa = "bescom@okaxis"),
+        Bill(id = 3, series = "c", name = "LIC Premium", kind = BillKind.LIC, amount = 15000.0, dueDate = LocalDate.now().plusDays(8),
+            recurrence = Recurrence.YEARLY, last4 = "6789"),
+        Bill(id = 4, series = "d", name = "Bajaj Finance Loan EMI", kind = BillKind.LOAN_EMI, amount = 12000.0, dueDate = LocalDate.now().plusDays(5),
+            recurrence = Recurrence.MONTHLY, autopay = true),
+        Bill(id = 5, series = "e", name = "Airtel Postpaid", kind = BillKind.PHONE, amount = 599.0, dueDate = LocalDate.now().minusDays(3),
+            recurrence = Recurrence.MONTHLY, paid = true, paidTs = System.currentTimeMillis(), paidTxnId = 9),
+    )
+
     private val state = UiState(
         month = YearMonth.now(),
+        bills = bills,
         accounts = accountsOf(txns),
         txns = txns,
         budgets = mapOf(Categories.TOTAL to 40000.0, "Food" to 700.0, "Shopping" to 3000.0, "Fuel" to 3000.0),
@@ -141,6 +155,9 @@ class ScreenshotTest {
             {}, {}, {},
         )
     }
+    @Test fun billsScreen() = shot("12_bills") { WithMonth { com.expensetracker.sms.ui.BillsScreen(bills, YearMonth.now(), {}, {}, { _, _ -> }) } }
+    @Test fun billEditor() = shot("12b_bill_editor") { com.expensetracker.sms.ui.BillEditorContent(bills[0], {}) }
+    @Test fun paySheet() = shot("12c_pay_sheet") { com.expensetracker.sms.ui.PayContent(bills[0], { _, _ -> }, { _, _ -> }) }
     @Test fun categories() = shot("9_categories") { CategoriesScreen({ _, _ -> }, {}) }
     @Test fun categoryEditor() = shot("9b_category_editor") { CategoryEditorContent(null, CatType.EXPENSE, { _, _ -> }) }
     @Test fun budgetSheet() = shot("8_budget_sheet") {

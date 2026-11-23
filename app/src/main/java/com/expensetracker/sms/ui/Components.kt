@@ -99,6 +99,8 @@ val CategoryIcons: List<Pair<String, ImageVector>> = listOf(
     "star" to Icons.Rounded.Star,
     "shield" to Icons.Rounded.Shield,
     "fees" to Icons.Rounded.RequestQuote,
+    "bolt" to Icons.Rounded.Bolt,
+    "water" to Icons.Rounded.WaterDrop,
     "category" to Icons.Rounded.Category,
 )
 private val iconMap = CategoryIcons.toMap()

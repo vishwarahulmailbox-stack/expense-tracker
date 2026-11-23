@@ -62,12 +62,15 @@ fun HomeScreen(
     onTxn: (Txn) -> Unit,
     onSeeAll: () -> Unit,
     onOpenBudgets: () -> Unit,
+    onOpenBills: () -> Unit = {},
+    onPayBill: (com.expensetracker.sms.Bill) -> Unit = {},
 ) {
     LazyColumn(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item { HeroCard(s, onOpenBudgets) }
+        item { UpcomingBillsCard(s.bills, onOpenBills, onPayBill) }
         if (s.byCategory.isNotEmpty() || s.incomeByCategory.isNotEmpty()) item { BreakdownCard(s) }
         if (s.spent > 0) item { DailySpendCard(s) }
         item {

@@ -22,6 +22,7 @@ data class UiState(
     val txns: List<Txn> = emptyList(),
     val budgets: Map<String, Double> = emptyMap(),
     val accounts: List<Account> = emptyList(),
+    val bills: List<Bill> = emptyList(),
     val busy: Boolean = false,
     val message: String? = null,
 ) {
@@ -76,7 +77,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val m = state.month
         viewModelScope.launch {
             val data = withContext(Dispatchers.IO) {
-                listOf(db.txnsInMonth(m), db.budgets(), db.categories(), db.accounts(m))
+                listOf(db.txnsInMonth(m), db.budgets(), db.categories(), db.accounts(m), db.bills())
             }
             @Suppress("UNCHECKED_CAST")
             Categories.set(data[2] as List<CategoryDef>)
@@ -86,6 +87,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     txns = data[0] as List<Txn>,
                     budgets = data[1] as Map<String, Double>,
                     accounts = data[3] as List<Account>,
+                    bills = data[4] as List<Bill>,
                 )
             }
         }
@@ -157,6 +159,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteCategory(def: CategoryDef) = io { db.deleteCategory(def) }
 
     fun renameAccount(key: String, nickname: String?) = io { db.setNickname(key, nickname) }
+
+    // ------------------------------------------------------------- bills
+
+    fun saveBill(bill: Bill) = io {
+        val b = if (bill.id == 0L && bill.series.isBlank()) bill.copy(series = BillEngine.newSeries()) else bill
+        val id = db.saveBill(b)
+        val saved = if (b.id == 0L) b.copy(id = id) else b
+        if (id > 0) BillEngine.matchExisting(getApplication(), saved)
+        BillReminders.checkNow(getApplication())
+    }
+
+    fun deleteBill(bill: Bill) = io { db.deleteBill(bill.id) }
+
+    fun setBillPaid(bill: Bill, paid: Boolean) {
+        io { if (paid) BillEngine.markPaid(getApplication(), bill, null) else BillEngine.markUnpaid(getApplication(), bill) }
+        state = state.copy(message = if (paid) "${bill.name} marked as paid" else "${bill.name} marked as unpaid")
+    }
+
+    /** UPI app reported success: mark paid now; the bank SMS will be linked when it arrives. */
+    fun onUpiResult(bill: Bill, response: String?) {
+        when (Upi.isSuccess(response)) {
+            true -> setBillPaid(bill, true)
+            false -> state = state.copy(message = "Payment didn't go through")
+            null -> state = state.copy(message = "We'll mark it paid when the bank SMS arrives")
+        }
+    }
 
     fun loadSkipped() {
         viewModelScope.launch { skipped = withContext(Dispatchers.IO) { db.skipped() } }

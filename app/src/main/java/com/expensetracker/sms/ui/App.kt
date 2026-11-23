@@ -12,6 +12,12 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
+import android.content.ActivityNotFoundException
+import androidx.compose.material.icons.outlined.EventNote
+import androidx.compose.material.icons.rounded.EventNote
+import com.expensetracker.sms.Bill
+import com.expensetracker.sms.LaunchRequest
+import com.expensetracker.sms.Upi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.IconButton
@@ -79,7 +85,7 @@ private fun openAppSettings(ctx: Context) {
 }
 
 @Composable
-fun App(vm: AppViewModel = viewModel()) {
+fun App(vm: AppViewModel = viewModel(), launch: LaunchRequest? = null, onLaunchHandled: () -> Unit = {}) {
     val ctx = LocalContext.current
     var granted by remember { mutableStateOf(hasSms(ctx)) }
     var denied by rememberSaveable { mutableStateOf(false) }
@@ -102,17 +108,18 @@ fun App(vm: AppViewModel = viewModel()) {
         )
     } else {
         LaunchedEffect(Unit) { vm.importIfFirstRun() }
-        MainScaffold(vm, onPrivacy = { showPrivacy = true })
+        MainScaffold(vm, onPrivacy = { showPrivacy = true }, launch = launch, onLaunchHandled = onLaunchHandled)
     }
     if (showPrivacy) PrivacyDialog { showPrivacy = false }
 }
 
-enum class Dest(val label: String, val icon: ImageVector, val selected: ImageVector) {
+enum class Dest(val label: String, val icon: ImageVector, val selected: ImageVector, val inBar: Boolean = true) {
     Home("Home", Icons.Outlined.Home, Icons.Rounded.Home),
     Txns("Transactions", Icons.Outlined.Receipt, Icons.Rounded.Receipt),
+    Bills("Bills", Icons.Outlined.EventNote, Icons.Rounded.EventNote),
     Accounts("Accounts", Icons.Outlined.CreditCard, Icons.Rounded.CreditCard),
     Budget("Budgets", Icons.Outlined.Savings, Icons.Rounded.Savings),
-    Settings("Settings", Icons.Outlined.Settings, Icons.Rounded.Settings),
+    Settings("Settings", Icons.Outlined.Settings, Icons.Rounded.Settings, inBar = false),
 }
 
 private sealed interface BudgetEdit {
@@ -120,7 +127,7 @@ private sealed interface BudgetEdit {
 }
 
 @Composable
-private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
+private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: LaunchRequest?, onLaunchHandled: () -> Unit) {
     val ctx = LocalContext.current
     var dest by rememberSaveable { mutableStateOf(Dest.Home) }
     var editing by remember { mutableStateOf<Txn?>(null) }
@@ -133,6 +140,44 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
     val closeSubScreen = { showCategories = false; showSkipped = false; selectedAccount = null }
     BackHandler(enabled = inSubScreen) { closeSubScreen() }
     val snack = remember { SnackbarHostState() }
+
+    // ---- Bills: edit / add / pay
+    var editingBill by remember { mutableStateOf<Bill?>(null) }
+    var addingBill by remember { mutableStateOf(false) }
+    var payBill by remember { mutableStateOf<Bill?>(null) }      // PaySheet open
+    var awaitingUpi by remember { mutableStateOf<Bill?>(null) }  // waiting for the UPI app's result
+    val upiLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val b = awaitingUpi ?: return@rememberLauncherForActivityResult
+        awaitingUpi = null
+        vm.onUpiResult(b, res.data?.getStringExtra("response") ?: res.data?.getStringExtra("Status")?.let { "Status=$it" })
+    }
+    val launchUpi: (Bill, Double) -> Unit = { b, amount ->
+        val uri = Upi.payUri(b.payeeVpa!!, b.name, amount, "Bill ${b.name}")
+        awaitingUpi = b
+        try {
+            upiLauncher.launch(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(uri)), "Pay with"))
+        } catch (e: ActivityNotFoundException) {
+            awaitingUpi = null
+            payBill = b
+        }
+    }
+    // One tap: straight to the UPI app if we know the payee, otherwise the pay sheet.
+    val pay: (Bill) -> Unit = { b ->
+        val vpa = b.payeeVpa
+        if (vpa != null && Upi.validate(vpa) == null && b.minDue == null) launchUpi(b, b.amount) else payBill = b
+    }
+    // Opened from a bill notification
+    LaunchedEffect(launch, vm.state.bills) {
+        val l = launch ?: return@LaunchedEffect
+        dest = Dest.Bills
+        if (l.payBillId == null) {
+            onLaunchHandled()
+            return@LaunchedEffect
+        }
+        val b = vm.state.bills.firstOrNull { it.id == l.payBillId } ?: return@LaunchedEffect
+        onLaunchHandled()
+        if (!b.paid) pay(b)
+    }
     val s = vm.state
 
     LaunchedEffect(s.message) {
@@ -166,7 +211,10 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                 },
                 actions = {
                     if (dest != Dest.Settings) {
-                        MonthPill(s.month, vm::prevMonth, vm::nextMonth, Modifier.padding(end = 8.dp))
+                        MonthPill(s.month, vm::prevMonth, vm::nextMonth)
+                        IconButton(onClick = { dest = Dest.Settings; closeSubScreen() }) {
+                            Icon(Icons.Outlined.Settings, "Settings")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -174,7 +222,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
         },
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest) {
-                Dest.entries.forEach { d ->
+                Dest.entries.filter { it.inBar }.forEach { d ->
                     NavigationBarItem(
                         selected = dest == d,
                         onClick = { dest = d; closeSubScreen() },
@@ -190,7 +238,15 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
             }
         },
         floatingActionButton = {
-            if (dest == Dest.Home || dest == Dest.Txns) {
+            if (dest == Dest.Bills) {
+                ExtendedFloatingActionButton(
+                    onClick = { addingBill = true },
+                    icon = { Icon(Icons.Rounded.Add, null) },
+                    text = { Text("Add bill") },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                )
+            } else if (dest == Dest.Home || dest == Dest.Txns) {
                 ExtendedFloatingActionButton(
                     onClick = { adding = true },
                     icon = { Icon(Icons.Rounded.Add, null) },
@@ -210,8 +266,17 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                     onTxn = { editing = it },
                     onSeeAll = { dest = Dest.Txns },
                     onOpenBudgets = { dest = Dest.Budget },
+                    onOpenBills = { dest = Dest.Bills },
+                    onPayBill = pay,
                 )
                 Dest.Txns -> TransactionsScreen(s, onTxn = { editing = it })
+                Dest.Bills -> BillsScreen(
+                    s.bills,
+                    s.month,
+                    onPay = pay,
+                    onEdit = { editingBill = it },
+                    onMarkPaid = { b, paid -> vm.setBillPaid(b, paid) },
+                )
                 Dest.Accounts -> AccountsScreen(
                     s,
                     selectedKey = selectedAccount,
@@ -247,6 +312,33 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit) {
                 )
             }
         }
+    }
+
+    editingBill?.let { b ->
+        BillEditorSheet(
+            bill = b,
+            onDismiss = { editingBill = null },
+            onSave = { vm.saveBill(it); editingBill = null },
+            onDelete = { vm.deleteBill(it); editingBill = null },
+            onTogglePaid = { vm.setBillPaid(it, !it.paid); editingBill = null },
+        )
+    }
+    if (addingBill) {
+        BillEditorSheet(
+            bill = null,
+            onDismiss = { addingBill = false },
+            onSave = { vm.saveBill(it); addingBill = false },
+            onDelete = {},
+            onTogglePaid = {},
+        )
+    }
+    payBill?.let { b ->
+        PaySheet(
+            bill = b,
+            onDismiss = { payBill = null },
+            onPayUpi = { bill, amount -> payBill = null; launchUpi(bill, amount) },
+            onSaveVpa = { bill, vpa -> vm.saveBill(bill.copy(payeeVpa = vpa)) },
+        )
     }
 
     editing?.let { t ->

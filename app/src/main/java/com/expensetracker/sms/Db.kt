@@ -16,7 +16,7 @@ object DataBus {
     fun bump() = version.update { it + 1 }
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 4) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 5) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -53,13 +53,114 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         upgradeToV2(db)
         upgradeToV3(db)
         upgradeToV4(db)
+        upgradeToV5(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) upgradeToV2(db)
         if (oldVersion < 3) upgradeToV3(db)
         if (oldVersion < 4) upgradeToV4(db)
+        if (oldVersion < 5) upgradeToV5(db)
     }
+
+    /** v5: bills & reminders. */
+    private fun upgradeToV5(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS bills(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                series TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                amount REAL NOT NULL,
+                min_due REAL,
+                due INTEGER NOT NULL,
+                recurrence TEXT NOT NULL,
+                paid INTEGER NOT NULL DEFAULT 0,
+                paid_ts INTEGER,
+                paid_txn INTEGER,
+                autopay INTEGER NOT NULL DEFAULT 0,
+                vpa TEXT,
+                last4 TEXT,
+                hint TEXT,
+                source TEXT NOT NULL,
+                sms_key TEXT,
+                notified INTEGER NOT NULL DEFAULT 0,
+                note TEXT NOT NULL DEFAULT '')"""
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS bills_series_due ON bills(series, due)")
+    }
+
+    private fun Bill.toCv() = ContentValues().apply {
+        put("series", series); put("name", name); put("kind", kind.name); put("amount", amount); put("min_due", minDue)
+        put("due", dueDate.toEpochDay()); put("recurrence", recurrence.name); put("paid", if (paid) 1 else 0)
+        put("paid_ts", paidTs); put("paid_txn", paidTxnId); put("autopay", if (autopay) 1 else 0); put("vpa", payeeVpa)
+        put("last4", last4); put("hint", hint); put("source", source); put("sms_key", smsKey); put("notified", notified)
+        put("note", note)
+    }
+
+    private fun Cursor.toBill(): Bill {
+        fun str(n: String) = getString(getColumnIndexOrThrow(n))
+        fun lng(n: String) = getColumnIndexOrThrow(n).let { if (isNull(it)) null else getLong(it) }
+        fun dbl(n: String) = getColumnIndexOrThrow(n).let { if (isNull(it)) null else getDouble(it) }
+        return Bill(
+            id = getLong(getColumnIndexOrThrow("id")),
+            series = str("series"),
+            name = str("name"),
+            kind = BillKind.entries.firstOrNull { it.name == str("kind") } ?: BillKind.OTHER,
+            amount = getDouble(getColumnIndexOrThrow("amount")),
+            minDue = dbl("min_due"),
+            dueDate = java.time.LocalDate.ofEpochDay(getLong(getColumnIndexOrThrow("due"))),
+            recurrence = Recurrence.entries.firstOrNull { it.name == str("recurrence") } ?: Recurrence.NONE,
+            paid = getInt(getColumnIndexOrThrow("paid")) == 1,
+            paidTs = lng("paid_ts"),
+            paidTxnId = lng("paid_txn"),
+            autopay = getInt(getColumnIndexOrThrow("autopay")) == 1,
+            payeeVpa = str("vpa"),
+            last4 = str("last4"),
+            hint = str("hint"),
+            source = str("source"),
+            smsKey = str("sms_key"),
+            notified = getInt(getColumnIndexOrThrow("notified")),
+            note = str("note"),
+        )
+    }
+
+    fun bills(): List<Bill> =
+        readableDatabase.rawQuery("SELECT * FROM bills ORDER BY due ASC", null).use { c ->
+            buildList { while (c.moveToNext()) add(c.toBill()) }
+        }
+
+    fun bill(id: Long): Bill? =
+        readableDatabase.rawQuery("SELECT * FROM bills WHERE id=?", arrayOf(id.toString())).use { c ->
+            if (c.moveToFirst()) c.toBill() else null
+        }
+
+    /** Insert a new bill (returns -1 if that series already has a bill on that date) or update by id. */
+    fun saveBill(b: Bill): Long =
+        if (b.id == 0L) writableDatabase.insertWithOnConflict("bills", null, b.toCv(), SQLiteDatabase.CONFLICT_IGNORE)
+        else {
+            writableDatabase.update("bills", b.toCv(), "id=?", arrayOf(b.id.toString()))
+            b.id
+        }
+
+    /** A payment-app copy was merged into the bank's transaction: keep bills pointing at the survivor. */
+    fun repointBillTxn(oldId: Long, newId: Long) {
+        writableDatabase.update("bills", ContentValues().apply { put("paid_txn", newId) }, "paid_txn=?", arrayOf(oldId.toString()))
+    }
+
+    fun deleteBill(id: Long) {
+        writableDatabase.delete("bills", "id=?", arrayOf(id.toString()))
+    }
+
+    fun billsInSeries(series: String): List<Bill> =
+        readableDatabase.rawQuery("SELECT * FROM bills WHERE series=? ORDER BY due ASC", arrayOf(series)).use { c ->
+            buildList { while (c.moveToNext()) add(c.toBill()) }
+        }
+
+    fun txn(id: Long): Txn? =
+        readableDatabase.rawQuery("SELECT * FROM txns WHERE id=?", arrayOf(id.toString())).use { c ->
+            if (c.moveToFirst()) c.toTxn() else null
+        }
 
     /** v4: where each transaction came from (bank vs payment app) and the skipped-SMS list. */
     private fun upgradeToV4(db: SQLiteDatabase) {
@@ -345,6 +446,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         writableDatabase.delete("rules", null, null)
         writableDatabase.delete("accounts", null, null)
         writableDatabase.delete("skipped", null, null)
+        writableDatabase.delete("bills", null, null)
     }
 
     fun budgets(): Map<String, Double> =

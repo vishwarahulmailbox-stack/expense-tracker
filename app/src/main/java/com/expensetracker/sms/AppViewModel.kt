@@ -103,6 +103,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 DataBus.bump()
             }
         }
+        // v8: SMS-text model + better payee reading ("Fvg: …", "wallet for …"): sort "Others" again.
+        if (prefs.getBoolean("imported", false) && !prefs.getBoolean("ai_sms_v1", false)) {
+            viewModelScope.launch {
+                val n = withContext(Dispatchers.IO) { runCatching { CategoryAI.sortOthers(app, reparse = true) }.getOrDefault(0) }
+                prefs.edit().putBoolean("ai_sms_v1", true).apply()
+                if (n > 0) state = state.copy(message = "AI sorted $n more transactions from Others")
+                DataBus.bump()
+            }
+        }
         // v4 upgrade: re-read the inbox with the new filters (recovers mandate debits etc.),
         // fill the skipped list and remove payment-app duplicates.
         if (prefs.getBoolean("imported", false) && !prefs.getBoolean("rescan_v4", false)) {

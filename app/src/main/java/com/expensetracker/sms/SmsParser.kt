@@ -94,9 +94,14 @@ object SmsParser {
 
     private val upiPathRx = Regex("""UPI/(?:P2[AM]/)?\d+/([A-Za-z][A-Za-z0-9 .&\-]{1,30}?)$STOP""", IC)
     private val atmRx = Regex("""\b(atm|cash withdrawal|cash wdl)\b""", IC)
-    private val toRx = Regex("""\b(?:to|towards)\s+(?:vpa\s+)?($NAME)$STOP""", IC)
+    private const val TITLE = """(?:(?:mr|mrs|ms|miss|dr|shri|smt)\.?\s+)?"""
+    private val toRx = Regex("""\b(?:to|towards)\s+(?:vpa\s+)?$TITLE($NAME)$STOP""", IC)
+    /** Union Bank style payee: "Fvg: LALIT KU", "Fv.GUPTA". */
+    private val favouringRx = Regex("""\b(?:fvg|fv|favou?ring)\s*[.:]\s*$TITLE([A-Za-z][A-Za-z0-9&'.\- ]{1,30}?)(?=\s+avl|\s+bal|,|\.\s|$)""", IC)
+    /** "You've paid Rs.21 via PhonePe wallet for Saleem Khan." */
+    private val walletForRx = Regex("""\bwallet\s+for\s+$TITLE([A-Za-z][A-Za-z0-9&'.\- ]{1,40}?)(?=\.\s|\.$|,|$)""", IC)
     private val atRx = Regex("""\bat\s+([A-Za-z][A-Za-z0-9&'._\-\s*]{1,40}?)$STOP""", IC)
-    private val fromRx = Regex("""\bfrom\s+(?:vpa\s+)?($NAME)$STOP""", IC)
+    private val fromRx = Regex("""\bfrom\s+(?:vpa\s+)?$TITLE($NAME)$STOP""", IC)
     private val byRx = Regex("""\bby\s+(?:vpa\s+)?($NAME)$STOP""", IC)
     private val infoRx = Regex("""\binfo[:\s\-]+([A-Za-z0-9][A-Za-z0-9&'._@/\-\s*]{1,40}?)$STOP""", IC)
     private val beforeCreditedRx = Regex("""[;.]\s*([A-Za-z][A-Za-z0-9&'.\-\s]{1,40}?)\s+credited""", IC)
@@ -208,7 +213,7 @@ object SmsParser {
 
     private fun findMerchant(text: String, isDebit: Boolean): String? {
         val order = if (isDebit) {
-            listOf(upiPathRx, toRx, atRx, beforeCreditedRx, infoRx)
+            listOf(upiPathRx, favouringRx, walletForRx, toRx, atRx, beforeCreditedRx, infoRx)
         } else {
             listOf(fromRx, infoRx, upiPathRx, byRx)
         }

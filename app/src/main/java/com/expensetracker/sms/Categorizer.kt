@@ -236,7 +236,7 @@ object Categorizer {
         if (rule != null) return rule
         if (!isDebit) return incomeCategory(merchant, body)
 
-        if (atmRx.containsMatchIn(body) && cashRx.containsMatchIn(body)) return "ATM/Cash"
+        if (merchant == "ATM Withdrawal" || (atmRx.containsMatchIn(body) && cashRx.containsMatchIn(body))) return "ATM/Cash"
         firstBrand(merchant)?.let { return it }
         firstShop(merchant)?.let { return it }
         firstBrand(body)?.let { return it }

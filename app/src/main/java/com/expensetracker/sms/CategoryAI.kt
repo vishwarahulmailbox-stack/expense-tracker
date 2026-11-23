@@ -25,9 +25,10 @@ class CategoryModel private constructor(
     private val start: IntArray,     // CSR index: entries for bucket b are [start[b], start[b+1])
     private val cls: ShortArray,
     private val cnt: FloatArray,
+    private val featurizer: (String) -> List<String> = ::features,
 ) {
     companion object {
-        fun read(input: InputStream): CategoryModel {
+        fun read(input: InputStream, featurizer: (String) -> List<String> = ::features): CategoryModel {
             val d = DataInputStream(input.buffered())
             val magic = ByteArray(4).also { d.readFully(it) }
             require(String(magic) == "ETCM") { "Not a category model" }
@@ -59,7 +60,7 @@ class CategoryModel private constructor(
             val start = IntArray(buckets + 1)
             for (b in bucketOf) start[b + 1]++
             for (i in 1..buckets) start[i] += start[i - 1]
-            return CategoryModel(buckets, alpha, temp, names, docs, totals, start, cls, cnt)
+            return CategoryModel(buckets, alpha, temp, names, docs, totals, start, cls, cnt, featurizer)
         }
 
         fun normalize(s: String) = s.lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex(" +"), " ").trim()
@@ -73,6 +74,31 @@ class CategoryModel private constructor(
                 for (n in 3..5) for (i in 0..p.length - n) out += "c:" + p.substring(i, i + n)
             }
             for (i in 0 until words.size - 1) out += "b:${words[i]}_${words[i + 1]}"
+            return out
+        }
+
+        // Must match sms_features in scripts/train_sms_model.py exactly.
+        private val SMS_STOP = "www pay ltd pvt limited private rs inr on to from ac a c the your you is has been for of by and or in at with via upi ref no not call sms block avl bal balance info txn dear customer user bank card credit debit debited credited dr cr amt amount date dt if done tap https http www com in co kotak hdfc icici sbi axis union india bob canara pnb idfc yes indusind federal reissue fraud help helpline please immediately report us our available limit lmt total refno rrn utr mob bk mb fv fvg vpa sent spent paid paying payment trf transfer transferred mr mrs ms account acct xx xxxx a/c x".split(' ').toSet()
+        private val smsVpaRx = Regex("([a-z0-9._\\-]{2,})@[a-z]{2,}")
+        private val nonLetters = Regex("[^a-z ]")
+
+        fun smsWords(body: String): List<String> {
+            val t = smsVpaRx.replace(body.lowercase()) { " " + it.groupValues[1] + " " }.replace(nonLetters, " ")
+            return t.split(' ').filter { it.length >= 2 && it !in SMS_STOP }
+        }
+
+        /** Features of a whole SMS: words, 4-letter pieces of longer words, and word pairs. */
+        fun smsFeatures(body: String): List<String> {
+            val words = smsWords(body)
+            val out = ArrayList<String>()
+            for (w in words) {
+                out += "s:$w"
+                if (w.length >= 4) {
+                    val p = "#$w#"
+                    for (i in 0..p.length - 4) out += "q:" + p.substring(i, i + 4)
+                }
+            }
+            for (i in 0 until words.size - 1) out += "t:${words[i]}_${words[i + 1]}"
             return out
         }
 
@@ -93,7 +119,7 @@ class CategoryModel private constructor(
      * of the shipped model (each correction weighs [boost] training examples).
      */
     fun predict(name: String, user: UserCounts? = null, boost: Float = 25f): List<Pair<String, Double>> {
-        val feats = features(name).map { bucket(it) }
+        val feats = featurizer(name).map { bucket(it) }
         if (feats.isEmpty()) return emptyList()
         val all = (classes + (user?.classes() ?: emptySet())).distinct()
         val k = all.size
@@ -170,11 +196,30 @@ object CategoryAI {
     private val notFromName = setOf("ATM/Cash", "Charges & fees", Categories.SELF, Categories.OTHERS)
 
     @Volatile private var model: CategoryModel? = null
+    @Volatile private var smsModel: CategoryModel? = null
+    /** How much the merchant-name model counts when both models have an opinion. */
+    private const val NAME_WEIGHT = 0.55
     private val user = UserCounts()
     @Volatile private var userLoaded = false
 
     private fun model(ctx: Context): CategoryModel? = model ?: synchronized(this) {
         model ?: runCatching { ctx.assets.open("category_model.bin").use { CategoryModel.read(it) } }.getOrNull()?.also { model = it }
+    }
+
+    private fun smsModel(ctx: Context): CategoryModel? = smsModel ?: synchronized(this) {
+        smsModel ?: runCatching { ctx.assets.open("sms_model.bin").use { CategoryModel.read(it, CategoryModel::smsFeatures) } }
+            .getOrNull()?.also { smsModel = it }
+    }
+
+    /** What the whole SMS suggests. Empty when the SMS itself says nothing about the purchase. */
+    fun predictSms(ctx: Context, body: String): List<Pair<String, Double>> {
+        val m = smsModel(ctx) ?: return emptyList()
+        val raw = synchronized(this) { m.predict(body) }
+        if (raw.firstOrNull()?.first == Categories.OTHERS) return emptyList()
+        val valid = Categories.expense.toSet()
+        val keep = raw.filter { it.first in valid && it.first != Categories.SELF && it.first != Categories.OTHERS }
+        val z = keep.sumOf { it.second }.takeIf { it > 0 } ?: return emptyList()
+        return keep.map { it.first to it.second / z }
     }
 
     private fun ensureUser(ctx: Context) {
@@ -200,7 +245,22 @@ object CategoryAI {
         return digits < 3 && n.any { it.isLetter() }
     }
 
-    /** Top guesses for an expense, restricted to existing expense categories. */
+    /**
+     * Top guesses for an expense: the merchant-name model (with your corrections) blended with
+     * the whole-SMS model when the SMS text is given. All on the phone.
+     */
+    fun predict(ctx: Context, merchant: String, body: String?): List<Pair<String, Double>> {
+        val byName = predict(ctx, merchant)
+        val bySms = body?.takeIf { it.isNotBlank() }?.let { runCatching { predictSms(ctx, it) }.getOrDefault(emptyList()) }.orEmpty()
+        if (bySms.isEmpty()) return byName
+        if (byName.isEmpty()) return bySms
+        val a = byName.toMap()
+        val b = bySms.toMap()
+        return (a.keys + b.keys).map { c -> c to NAME_WEIGHT * (a[c] ?: 0.0) + (1 - NAME_WEIGHT) * (b[c] ?: 0.0) }
+            .sortedByDescending { it.second }
+    }
+
+    /** Top guesses from the merchant name alone, restricted to existing expense categories. */
     fun predict(ctx: Context, merchant: String): List<Pair<String, Double>> {
         if (!usableName(merchant)) return emptyList()
         val m = model(ctx) ?: return emptyList()
@@ -213,8 +273,8 @@ object CategoryAI {
     }
 
     /** Best guess if it's confident enough to apply automatically. */
-    fun suggest(ctx: Context, merchant: String): Pair<String, Double>? =
-        predict(ctx, merchant).firstOrNull()?.takeIf { it.second >= APPLY }
+    fun suggest(ctx: Context, merchant: String, body: String? = null): Pair<String, Double>? =
+        predict(ctx, merchant, body).firstOrNull()?.takeIf { it.second >= APPLY }
 
     /** Learn from the user: [weight] 1 = a correction, 0.5 = a confirmation. */
     fun learn(ctx: Context, merchant: String, category: String, weight: Float = 1f) {
@@ -256,15 +316,35 @@ object CategoryAI {
         synchronized(this) { user.clear() }
     }
 
-    /** Re-check "Others" transactions with the model (used once after upgrading). */
-    fun sortOthers(ctx: Context): Int {
+    /**
+     * Re-check "Others" transactions (used once after upgrading). With [reparse], the SMS is read
+     * again with the newer parser first, so payees it used to miss ("Fvg: …", "wallet for …") show up.
+     */
+    fun sortOthers(ctx: Context, reparse: Boolean = false): Int {
         val db = Db.get(ctx)
         var n = 0
-        db.allTxns().filter { it.isDebit && it.category == Categories.OTHERS && !it.aiReviewed && db.ruleFor(it.merchant) == null }
-            .forEach { t ->
-                val s = suggest(ctx, t.merchant) ?: return@forEach
-                db.update(t.copy(category = s.first, aiConf = s.second))
-                n++
+        db.allTxns().filter { it.isDebit && it.category == Categories.OTHERS && !it.aiReviewed }
+            .forEach { t0 ->
+                var t = t0
+                if (reparse && t.smsKey != null) {
+                    (SmsParser.classify("AD-BANK", t.body, lenient = true) as? ParseResult.Ok)?.txn?.merchant
+                        ?.takeIf { it != "BANK" && it != t.merchant }
+                        ?.let { t = t.copy(merchant = it) }
+                }
+                val rule = db.ruleFor(t.merchant)
+                val cat = rule ?: Categorizer.categorize(t.merchant, t.body, true, null)
+                when {
+                    cat == Categories.SELF -> { db.update(SelfTransfer.mark(t)); n++ }
+                    cat != Categories.OTHERS -> { db.update(t.copy(category = cat)); n++ }
+                    else -> {
+                        val s = suggest(ctx, t.merchant, t.body)
+                        if (s != null) {
+                            db.update(t.copy(category = s.first, aiConf = s.second)); n++
+                        } else if (t !== t0) {
+                            db.update(t) // at least keep the better merchant name
+                        }
+                    }
+                }
             }
         return n
     }

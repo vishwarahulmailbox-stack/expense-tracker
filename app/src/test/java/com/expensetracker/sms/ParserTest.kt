@@ -27,6 +27,26 @@ class ParserTest {
         assertEquals("Zomato Ltd", p.merchant)
     }
 
+    @Test fun unionBankFavouringPayee() {
+        val a = parse("Union Bank of India A/c *6081 Debited Rs:43.08 on 20-10-2026 20:41:10 by Mob Bk ref no 821549468932, Fvg: MUJEEB K Avl Bal Rs:30475.16. Not you?Call 66013348/SMS BLOCK 1607 to 7146551970", "AD-UNIONB")!!
+        assertEquals("Mujeeb K", a.merchant)
+        val b = parse("Union Bank of India A/c*6081 Dr Rs11.03 on 04-11-26 20:50 by MB 961537781313 Fv.Isara, Bal Rs26807.56 Not U?Call 66013348/SMS BLOCK 1607 to 7637009924", "AD-UNIONB")!!
+        assertEquals("Isara", b.merchant)
+    }
+
+    @Test fun walletForPayeeAndTitles() {
+        val w = parse("You've paid Rs.185 via PhonePe wallet for mahek gents parlur. Not you? Call us on 318-61681730. Remaining balance: Rs.334.", "VM-PHONPE")!!
+        assertEquals("mahek gents parlur", w.merchant)
+        val t = parse("Your A/C XXXXX165661 Debited INR 3,718.57 on 01/04/26 -Transferred to Mr. RAHUL RAVINDRA V. Avl Balance INR 17,202.27-SBI", "AD-SBIINB")!!
+        assertEquals("Rahul Ravindra V", t.merchant)
+    }
+
+    @Test fun atmByLineIsCash() {
+        val body = "Your SB A/c *6081 Debited for Rs.5933.73 on 25-02-2026 07:42:14 by ATM Avl Bal Rs.73309.80, If not you, Call 3596721962 -Union Bank of India"
+        val p = parse(body, "AD-UNIONB")!!
+        assertEquals("ATM/Cash", Categorizer.categorize(p.merchant, body, true, null))
+    }
+
     @Test fun axisUpiPath() {
         val p = parse("INR 180.00 debited A/c no. XX5678 12-01-25, 10:30:00 UPI/P2M/412345678901/UBER INDIA Not you? SMS BLOCK to 919951860002 - Axis Bank", "AX-AXISBK")!!
         assertEquals("Uber India", p.merchant)

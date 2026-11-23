@@ -62,10 +62,10 @@ object SmsImporter {
         val db = Db.get(ctx)
         val rule = db.ruleFor(p.merchant)
         var category = Categorizer.categorize(p.merchant, body, p.isDebit, rule)
-        // Rules found nothing: ask the on-device model (merchant name only, never leaves the phone).
+        // Rules found nothing: ask the on-device models (merchant name + SMS text; nothing leaves the phone).
         var aiConf: Double? = null
         if (p.isDebit && rule == null && category == Categories.OTHERS) {
-            runCatching { CategoryAI.suggest(ctx, p.merchant) }.getOrNull()?.let { (cat, conf) ->
+            runCatching { CategoryAI.suggest(ctx, p.merchant, body) }.getOrNull()?.let { (cat, conf) ->
                 category = cat
                 aiConf = conf
             }

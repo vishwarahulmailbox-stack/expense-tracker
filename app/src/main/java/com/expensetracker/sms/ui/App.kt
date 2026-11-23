@@ -60,6 +60,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -152,6 +155,15 @@ enum class Dest(val label: String, val icon: ImageVector, val selected: ImageVec
     Settings("Settings", Icons.Outlined.Settings, Icons.Rounded.Settings, inBar = false),
 }
 
+/** Pages opened on top of a tab (Back closes the top one). */
+sealed interface Sub {
+    data object Trends : Sub
+    data object Search : Sub
+    data class Recap(val month: java.time.YearMonth) : Sub
+    data class CategoryDetail(val category: String) : Sub
+    data class MerchantDetail(val merchant: com.expensetracker.sms.MerchantTotal) : Sub
+}
+
 private sealed interface BudgetEdit {
     data class Of(val category: String?) : BudgetEdit
 }
@@ -166,8 +178,15 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
     var showCategories by rememberSaveable { mutableStateOf(false) }
     var selectedAccount by rememberSaveable { mutableStateOf<String?>(null) }
     var showSkipped by rememberSaveable { mutableStateOf(false) }
-    val inSubScreen = (dest == Dest.Settings && (showCategories || showSkipped)) || (dest == Dest.Accounts && selectedAccount != null)
-    val closeSubScreen = { showCategories = false; showSkipped = false; selectedAccount = null }
+    val stack = remember { mutableStateListOf<Sub>() }
+    val sub = stack.lastOrNull()
+    var txTab by rememberSaveable { mutableIntStateOf(0) }
+    var categorising by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val open: (Sub) -> Unit = { stack.add(it) }
+    val inSubScreen = sub != null || (dest == Dest.Settings && (showCategories || showSkipped)) || (dest == Dest.Accounts && selectedAccount != null)
+    val closeAll = { stack.clear(); showCategories = false; showSkipped = false; selectedAccount = null }
+    val closeSubScreen: () -> Unit = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) else closeAll() }
     BackHandler(enabled = inSubScreen) { closeSubScreen() }
     val snack = remember { SnackbarHostState() }
     val hidden = LocalIncomeHidden.current
@@ -216,6 +235,22 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
         if (!b.paid) pay(b)
     }
     val s = vm.state
+    val share: (Uri?, String, String) -> Unit = { uri, mime, title ->
+        if (uri != null) {
+            val send = Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            ctx.startActivity(Intent.createChooser(send, title).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+    val onExport: (ExportKind) -> Unit = { kind ->
+        when (kind) {
+            ExportKind.CSV -> reveal { vm.exportCsv(s.month, s.accountFilter) { share(it, "text/csv", "Export expenses") } }
+            ExportKind.PDF -> reveal { vm.exportPdf(s.month, s.accountFilter, true) { share(it, "application/pdf", "Share report") } }
+            ExportKind.PDF_SPENDS -> vm.exportPdf(s.month, s.accountFilter, false) { share(it, "application/pdf", "Share report") }
+        }
+    }
+    val recurringKeys = remember(s.recurring, s.bills) {
+        (s.recurring.map { it.key } + s.bills.mapNotNull { b -> b.hint?.let { com.expensetracker.sms.Insights.merchantKey(it) } }).toSet()
+    }
 
     LaunchedEffect(s.message) {
         s.message?.let {
@@ -236,6 +271,11 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                 title = {
                     Text(
                         when {
+                            sub is Sub.Trends -> "Trends"
+                            sub is Sub.Search -> "Search"
+                            sub is Sub.Recap -> "${monthName(sub.month)} recap"
+                            sub is Sub.CategoryDetail -> sub.category
+                            sub is Sub.MerchantDetail -> "Merchant"
                             dest == Dest.Settings && showCategories -> "Categories"
                             dest == Dest.Settings && showSkipped -> "Skipped messages"
                             dest == Dest.Accounts && selectedAccount != null ->
@@ -244,12 +284,21 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                             else -> dest.label
                         },
                         style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 },
                 actions = {
-                    if (dest != Dest.Settings) {
+                    if (sub == null && dest != Dest.Settings) {
+                        IconButton(onClick = { searchQuery = ""; vm.search(""); open(Sub.Search) }) {
+                            Icon(Icons.Rounded.Search, "Search")
+                        }
+                    }
+                    if (dest != Dest.Settings && (sub == null || sub is Sub.CategoryDetail || sub is Sub.MerchantDetail)) {
                         MonthPill(s.month, vm::prevMonth, vm::nextMonth)
-                        IconButton(onClick = { dest = Dest.Settings; closeSubScreen() }) {
+                    }
+                    if (sub == null && dest != Dest.Settings) {
+                        IconButton(onClick = { dest = Dest.Settings; closeAll() }) {
                             Icon(Icons.Outlined.Settings, "Settings")
                         }
                     }
@@ -262,7 +311,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                 Dest.entries.filter { it.inBar }.forEach { d ->
                     NavigationBarItem(
                         selected = dest == d,
-                        onClick = { dest = d; closeSubScreen() },
+                        onClick = { dest = d; closeAll() },
                         alwaysShowLabel = true,
                         icon = { Icon(if (dest == d) d.selected else d.icon, contentDescription = d.label) },
                         label = { Text(d.label, maxLines = 1, style = MaterialTheme.typography.labelSmall) },
@@ -275,7 +324,9 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
             }
         },
         floatingActionButton = {
-            if (dest == Dest.Bills) {
+            if (sub != null) {
+                // no FAB on detail pages
+            } else if (dest == Dest.Bills) {
                 ExtendedFloatingActionButton(
                     onClick = { addingBill = true },
                     icon = { Icon(Icons.Rounded.Add, null) },
@@ -297,7 +348,14 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             if (s.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            when (dest) {
+          CompositionLocalProvider(LocalRecurringKeys provides recurringKeys) {
+            if (sub != null) when (sub) {
+                Sub.Trends -> TrendsScreen(s, vm::setAccountFilter, onReview = { open(Sub.Recap(it)) }, onCategory = { open(Sub.CategoryDetail(it)) })
+                Sub.Search -> SearchScreen(searchQuery, { searchQuery = it; vm.search(it) }, vm.searchResults, openTxn)
+                is Sub.Recap -> RecapScreen(s, sub.month, openTxn, onCategory = { open(Sub.CategoryDetail(it)) })
+                is Sub.CategoryDetail -> CategoryDetailScreen(s, sub.category, openTxn, onSetBudget = { budgetEdit = BudgetEdit.Of(it) })
+                is Sub.MerchantDetail -> MerchantDetailScreen(s, sub.merchant, openTxn)
+            } else when (dest) {
                 Dest.Home -> HomeScreen(
                     s,
                     onTxn = openTxn,
@@ -307,14 +365,33 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     onPayBill = pay,
                     reviewCount = vm.reviewQueue.size,
                     onReview = { reviewing = true },
+                    name = vm.firstName,
+                    onTrends = { open(Sub.Trends) },
+                    onCategories = { txTab = 1; dest = Dest.Txns },
+                    onSearch = { searchQuery = ""; vm.search(""); open(Sub.Search) },
+                    onRecap = { open(Sub.Recap(it)) },
                 )
-                Dest.Txns -> TransactionsScreen(s, onTxn = openTxn)
+                Dest.Txns -> TransactionsScreen(
+                    s,
+                    onTxn = openTxn,
+                    tab = txTab,
+                    onTab = { txTab = it },
+                    onCategory = { open(Sub.CategoryDetail(it)) },
+                    onMerchant = { open(Sub.MerchantDetail(it)) },
+                    onCategorise = { categorising = true },
+                    onSetBudget = { budgetEdit = BudgetEdit.Of(it) },
+                    onAccountFilter = vm::setAccountFilter,
+                    onExport = onExport,
+                )
                 Dest.Bills -> BillsScreen(
                     s.bills,
                     s.month,
                     onPay = pay,
                     onEdit = { editingBill = it },
                     onMarkPaid = { b, paid -> vm.setBillPaid(b, paid) },
+                    recurring = s.recurring,
+                    onAcceptRecurring = vm::acceptRecurring,
+                    onDismissRecurring = vm::dismissRecurring,
                 )
                 Dest.Accounts -> AccountsScreen(
                     s,
@@ -354,7 +431,18 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     onHideIncome = { on -> if (on) vm.setHideIncomePref(true) else reveal { vm.setHideIncomePref(false) } },
                 )
             }
+          }
         }
+    }
+
+    if (categorising) {
+        val groups = remember { com.expensetracker.sms.Insights.uncategorised(s.all) }
+        CategoriseSheet(
+            groups = groups,
+            suggestionsFor = { vm.aiTop(it) },
+            onAssign = { txns, cat -> vm.categoriseMerchant(txns, cat) },
+            onDismiss = { categorising = false },
+        )
     }
 
     editingBill?.let { b ->

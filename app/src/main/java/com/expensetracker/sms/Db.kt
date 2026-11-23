@@ -16,7 +16,7 @@ object DataBus {
     fun bump() = version.update { it + 1 }
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 6) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 7) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -55,6 +55,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         upgradeToV4(db)
         upgradeToV5(db)
         upgradeToV6(db)
+        upgradeToV7(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -63,6 +64,22 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         if (oldVersion < 4) upgradeToV4(db)
         if (oldVersion < 5) upgradeToV5(db)
         if (oldVersion < 6) upgradeToV6(db)
+        if (oldVersion < 7) upgradeToV7(db)
+    }
+
+    /** v7: your own tags on transactions. */
+    private fun upgradeToV7(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE txns ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
+    }
+
+    /** Search all months by merchant, note, category, tag or amount. */
+    fun search(q: String, limit: Int = 200): List<Txn> {
+        val like = "%" + q.trim().replace("%", "") + "%"
+        val amt = q.trim().replace(",", "").removePrefix("₹").trim().toDoubleOrNull()
+        val sql = if (amt != null) "SELECT * FROM txns WHERE merchant LIKE ? OR note LIKE ? OR category LIKE ? OR tags LIKE ? OR ABS(amount - ?) < 1 ORDER BY ts DESC LIMIT $limit"
+        else "SELECT * FROM txns WHERE merchant LIKE ? OR note LIKE ? OR category LIKE ? OR tags LIKE ? ORDER BY ts DESC LIMIT $limit"
+        val args = if (amt != null) arrayOf(like, like, like, like, amt.toString()) else arrayOf(like, like, like, like)
+        return readableDatabase.rawQuery(sql, args).use { c -> buildList { while (c.moveToNext()) add(c.toTxn()) } }
     }
 
     /** v6: on-device AI — confidence per transaction and the user's own learning. */
@@ -405,6 +422,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         put("source", source)
         put("ai_conf", aiConf)
         put("ai_reviewed", if (aiReviewed) 1 else 0)
+        put("tags", tags.joinToString(","))
     }
 
     private fun Cursor.toTxn() = Txn(
@@ -425,6 +443,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         source = getString(getColumnIndexOrThrow("source")),
         aiConf = getColumnIndexOrThrow("ai_conf").let { if (isNull(it)) null else getDouble(it) },
         aiReviewed = getInt(getColumnIndexOrThrow("ai_reviewed")) == 1,
+        tags = getString(getColumnIndexOrThrow("tags")).orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() },
     )
 
     /** Returns -1 if this SMS was already saved. */

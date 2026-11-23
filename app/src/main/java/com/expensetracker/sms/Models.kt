@@ -32,6 +32,8 @@ data class Txn(
     val aiConf: Double? = null,
     /** True once the user confirmed or changed an AI-picked category. */
     val aiReviewed: Boolean = false,
+    /** Your own tags (e.g. "Office", "Trip"). Automatic ones come from Insights.autoTags. */
+    val tags: List<String> = emptyList(),
 ) {
     val needsReview: Boolean get() = !aiReviewed && aiConf != null && aiConf < CategoryAI.SURE
 

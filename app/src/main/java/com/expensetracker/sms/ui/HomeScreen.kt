@@ -15,6 +15,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.rounded.NorthEast
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.PieChart
+import androidx.compose.material.icons.rounded.EmojiEvents
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.SouthWest
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,12 +78,34 @@ fun HomeScreen(
     onPayBill: (com.expensetracker.sms.Bill) -> Unit = {},
     reviewCount: Int = 0,
     onReview: () -> Unit = {},
+    name: String? = null,
+    onTrends: () -> Unit = {},
+    onCategories: () -> Unit = {},
+    onSearch: () -> Unit = {},
+    onRecap: (YearMonth) -> Unit = {},
+    today: LocalDate = LocalDate.now(),
 ) {
+    val lastMonth = YearMonth.from(today).minusMonths(1)
+    val lastMonthSpent = if (s.month == YearMonth.from(today) && today.dayOfMonth <= 7) {
+        s.all.filter { it.isDebit && !it.ignored && it.category != Categories.SELF && YearMonth.from(toLocalDate(it.timestamp)) == lastMonth }.sumOf { it.amount }
+    } else 0.0
     LazyColumn(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        item { Greeting(name, s.month) }
         item { HeroCard(s, onOpenBudgets) }
+        item {
+            ShortcutRow(
+                listOf(
+                    Triple("Trends", Icons.Rounded.Insights, onTrends),
+                    Triple("Categories", Icons.Rounded.PieChart, onCategories),
+                    Triple("Recap", Icons.Rounded.EmojiEvents, { onRecap(if (lastMonthSpent > 0) lastMonth else s.month) }),
+                    Triple("Search", Icons.Rounded.Search, onSearch),
+                )
+            )
+        }
+        if (lastMonthSpent > 0) item { RecapPromptCard(lastMonth, lastMonthSpent) { onRecap(lastMonth) } }
         if (reviewCount > 0) item { AiReviewCard(reviewCount, onReview) }
         item { UpcomingBillsCard(s.bills, onOpenBills, onPayBill) }
         if (s.byCategory.isNotEmpty() || s.incomeByCategory.isNotEmpty()) item { BreakdownCard(s) }
@@ -338,7 +371,10 @@ fun TxnRow(t: Txn, onClick: () -> Unit) {
             .alpha(if (t.ignored) 0.6f else 1f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CategoryBadge(t.category, 38.dp)
+        Box {
+            CategoryBadge(t.category, 38.dp)
+            DirectionDot(t, Modifier.align(Alignment.BottomEnd).offset(x = 4.dp, y = 4.dp))
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(t.merchant, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -366,7 +402,35 @@ fun TxnRow(t: Txn, onClick: () -> Unit) {
             )
             if (t.ignored) {
                 Text(if (isSelf) "Not counted" else "Excluded", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                val keys = LocalRecurringKeys.current
+                val tags = remember(t, keys) { com.expensetracker.sms.Insights.allTags(t, keys) }
+                TagLine(tags.take(2), Modifier.widthIn(max = 110.dp))
             }
         }
+    }
+}
+
+/** ↗ money out, ↙ money in, ⟲ refund, ⇄ own transfer — a small dot on the category badge. */
+@Composable
+fun DirectionDot(t: Txn, modifier: Modifier = Modifier) {
+    val refund = !t.isDebit && (t.category == "Refund & cashback" || Regex("(?i)\\b(refund|reversal|reversed|cashback)\\b").containsMatchIn(t.body))
+    val (icon, color) = when {
+        t.category == Categories.SELF -> Icons.Rounded.SwapHoriz to MaterialTheme.colorScheme.onSurfaceVariant
+        refund -> Icons.Rounded.Replay to Color(0xFFDB2777)
+        t.isDebit -> Icons.Rounded.NorthEast to AppColors.danger
+        else -> Icons.Rounded.SouthWest to AppColors.income
+    }
+    Box(
+        modifier
+            .size(17.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .padding(2.dp)
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.16f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, if (t.isDebit) "Money out" else if (refund) "Refund" else "Money in", Modifier.size(10.dp), tint = color)
     }
 }

@@ -96,9 +96,13 @@ fun BillsScreen(
     onPay: (Bill) -> Unit,
     onEdit: (Bill) -> Unit,
     onMarkPaid: (Bill, Boolean) -> Unit,
+    recurring: List<com.expensetracker.sms.RecurringSuggestion> = emptyList(),
+    onAcceptRecurring: (com.expensetracker.sms.RecurringSuggestion) -> Unit = {},
+    onDismissRecurring: (com.expensetracker.sms.RecurringSuggestion) -> Unit = {},
+    today: LocalDate = LocalDate.now(),
 ) {
-    val today = LocalDate.now()
     var filter by rememberSaveable { mutableStateOf("upcoming") }
+    var calendar by rememberSaveable { mutableStateOf(false) }
     val monthBills = bills.filter { YearMonth.from(it.dueDate) == month }
     val upcoming = bills.filter { it.status(today) == BillStatus.PENDING }.sortedBy { it.dueDate }
     val overdue = bills.filter { it.status(today) == BillStatus.OVERDUE }.sortedBy { it.dueDate }
@@ -115,6 +119,19 @@ fun BillsScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item { BillsSummary(monthBills, month, today) }
+        if (recurring.isNotEmpty()) {
+            item { SectionHeader("Spotted in your payments") }
+            items(recurring.take(3), key = { "r-" + it.key }) { r ->
+                RecurringCard(r, onYes = { onAcceptRecurring(r) }, onNo = { onDismissRecurring(r) })
+            }
+        }
+        item {
+            SegmentedTabs(listOf("List", "Calendar"), if (calendar) 1 else 0, { calendar = it == 1 })
+        }
+        if (calendar) {
+            item { Column { BillsCalendar(bills, month, today, onEdit) } }
+            return@LazyColumn
+        }
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 val chips = listOf(

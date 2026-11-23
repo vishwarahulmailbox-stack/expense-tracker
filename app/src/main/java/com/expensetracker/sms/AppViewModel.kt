@@ -23,6 +23,11 @@ data class UiState(
     val budgets: Map<String, Double> = emptyMap(),
     val accounts: List<Account> = emptyList(),
     val bills: List<Bill> = emptyList(),
+    /** Every transaction (all months), for trends, drill-downs and recurring detection. */
+    val all: List<Txn> = emptyList(),
+    val recurring: List<RecurringSuggestion> = emptyList(),
+    /** null = all accounts. */
+    val accountFilter: String? = null,
     val busy: Boolean = false,
     val message: String? = null,
 ) {
@@ -47,6 +52,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     // ---- Income privacy: hidden until the phone's screen lock is used; locks again when the app leaves the screen.
+    /** First name for the greeting, from "Your names" in Settings. */
+    val firstName: String?
+        get() = myNames.split(',').firstOrNull()?.trim()?.split(' ')?.firstOrNull()
+            ?.takeIf { it.length >= 2 }?.lowercase()?.replaceFirstChar { it.uppercase() }
+
     var hideIncome by mutableStateOf(prefs.getBoolean("hide_income", true))
         private set
     var incomeUnlocked by mutableStateOf(false)
@@ -102,7 +112,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val m = state.month
         viewModelScope.launch {
             val data = withContext(Dispatchers.IO) {
-                listOf(db.txnsInMonth(m), db.budgets(), db.categories(), db.accounts(m), db.bills())
+                val all = db.allTxns()
+                val bills = db.bills()
+                val dismissed = prefs.getStringSet("recurring_dismissed", emptySet()).orEmpty()
+                val billKeys = bills.flatMap { listOfNotNull(Insights.merchantKey(it.name), it.hint?.let(Insights::merchantKey)) }.toSet()
+                val recurring = runCatching {
+                    Insights.detectRecurring(all, java.time.LocalDate.now(), { k -> billKeys.any { b -> b.isNotEmpty() && (k.contains(b) || b.contains(k)) } }, dismissed)
+                }.getOrDefault(emptyList())
+                listOf(db.txnsInMonth(m), db.budgets(), db.categories(), db.accounts(m), bills, all, recurring)
             }
             @Suppress("UNCHECKED_CAST")
             Categories.set(data[2] as List<CategoryDef>)
@@ -113,6 +130,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     budgets = data[1] as Map<String, Double>,
                     accounts = data[3] as List<Account>,
                     bills = data[4] as List<Bill>,
+                    all = data[5] as List<Txn>,
+                    recurring = data[6] as List<RecurringSuggestion>,
                 )
             }
         }
@@ -254,6 +273,77 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ------------------------------------------------------- insights
+
+    fun setAccountFilter(key: String?) {
+        state = state.copy(accountFilter = key)
+    }
+
+    fun selectMonth(m: YearMonth) {
+        if (m <= YearMonth.now()) {
+            state = state.copy(month = m)
+            reload()
+        }
+    }
+
+    /** "Set reminder? Yes" on a detected recurring payment → a bill in the Bills tab. */
+    fun acceptRecurring(r: RecurringSuggestion) {
+        val kind = when (r.category) {
+            "EMI/Loan" -> BillKind.LOAN_EMI
+            "Insurance" -> BillKind.INSURANCE
+            "Entertainment" -> BillKind.SUBSCRIPTION
+            "Rent" -> BillKind.RENT
+            else -> BillKind.OTHER
+        }
+        saveBill(
+            Bill(
+                series = "recurring:" + r.key, name = r.name, kind = kind, amount = r.amount, dueDate = r.nextDue,
+                recurrence = Recurrence.MONTHLY, autopay = r.autopay, hint = r.key, source = "recurring",
+            )
+        )
+        state = state.copy(message = "Reminder set for ${r.name}")
+    }
+
+    fun dismissRecurring(r: RecurringSuggestion) {
+        val set = prefs.getStringSet("recurring_dismissed", emptySet()).orEmpty() + r.key
+        prefs.edit().putStringSet("recurring_dismissed", set).apply()
+        state = state.copy(recurring = state.recurring - r)
+    }
+
+    /** Categorise every transaction of a merchant at once (and remember it). */
+    fun categoriseMerchant(txns: List<Txn>, category: String) {
+        if (txns.isEmpty()) return
+        io {
+            txns.forEach { db.update(normalized(it, it.copy(category = category, aiReviewed = true, aiConf = null))) }
+            db.setRule(txns.first().merchant, category)
+            CategoryAI.learn(getApplication(), txns.first().merchant, category, 1f)
+        }
+    }
+
+    var searchResults by mutableStateOf<List<Txn>>(emptyList())
+        private set
+
+    fun search(q: String) {
+        if (q.isBlank()) { searchResults = emptyList(); return }
+        viewModelScope.launch { searchResults = withContext(Dispatchers.IO) { db.search(q) } }
+    }
+
+    /** PDF report of a month (optionally one account), shared via the system sheet. */
+    fun exportPdf(month: YearMonth, accountKey: String?, includeIncome: Boolean, onReady: (Uri?) -> Unit) {
+        viewModelScope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                runCatching {
+                    val app = getApplication<Application>()
+                    val txns = Insights.filterAccount(state.all, accountKey).filter { YearMonth.from(toLocalDate(it.timestamp)) == month }
+                    val file = ReportPdf.write(app, month, txns, state.budgets[Categories.TOTAL], includeIncome,
+                        accountKey?.let { k -> state.accounts.firstOrNull { it.key == k }?.let { a -> a.nickname ?: "${a.bank} ••${a.last4}" } })
+                    FileProvider.getUriForFile(app, app.packageName + ".files", file)
+                }.getOrNull()
+            }
+            onReady(uri)
+        }
+    }
+
     fun loadSkipped() {
         viewModelScope.launch { skipped = withContext(Dispatchers.IO) { db.skipped() } }
     }
@@ -311,7 +401,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Writes all transactions to a CSV in the cache folder and returns a shareable Uri. */
-    fun exportCsv(onReady: (Uri?) -> Unit) {
+    fun exportCsv(onReady: (Uri?) -> Unit) = exportCsv(null, null, onReady)
+
+    /** CSV of everything, or of one month / one account. */
+    fun exportCsv(month: YearMonth?, accountKey: String?, onReady: (Uri?) -> Unit) {
         viewModelScope.launch {
             val uri = withContext(Dispatchers.IO) {
                 runCatching {
@@ -319,13 +412,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val dir = File(app.cacheDir, "exports").apply { mkdirs() }
                     val file = File(dir, "expenses-${LocalDate.now()}.csv")
                     file.bufferedWriter().use { w ->
-                        w.write("Date,Type,Amount,Merchant,Category,Account,Note,Excluded\n")
-                        db.allTxns().forEach { t ->
+                        w.write("Date,Type,Amount,Merchant,Category,Account,Note,Tags,Excluded\n")
+                        Insights.filterAccount(db.allTxns(), accountKey)
+                            .filter { month == null || YearMonth.from(toLocalDate(it.timestamp)) == month }
+                            .forEach { t ->
                             val cells = listOf(
                                 toLocalDate(t.timestamp).toString(),
                                 if (t.isDebit) "Expense" else "Income",
                                 "%.2f".format(Locale.US, t.amount),
-                                t.merchant, t.category, t.account ?: "", t.note,
+                                t.merchant, t.category, t.account ?: "", t.note, t.tags.joinToString(" ") { "#$it" },
                                 if (t.ignored) "Yes" else "No",
                             )
                             w.write(cells.joinToString(",") { "\"" + it.replace("\"", "\"\"") + "\"" } + "\n")

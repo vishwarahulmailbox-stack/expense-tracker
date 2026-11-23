@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.expensetracker.sms.ui.*
 import com.expensetracker.sms.ui.AddTxnContent
 import com.expensetracker.sms.ui.AppTheme
 import com.expensetracker.sms.ui.BudgetEditorContent
@@ -75,6 +76,22 @@ class ScreenshotTest {
         t(560.0, "Apollo Pharmacy", "Health", 12, 16),
     )
 
+    /** Older months for trends, drill-downs, recap, recurring and the categorise flow. */
+    private val history: List<Txn> = (1..7).flatMap { k ->
+        val d = 30L * k
+        listOf(
+            t(85000.0, "Acme Technologies", "Salary", d + 2, 10, debit = false),
+            t(15000.0, "Rent", "Rent", d + 8, 10, acct = "5678", bank = "SBI"),
+            t(649.0, "Netflix", "Entertainment", d + 4, 8),
+            t(300.0 + 90 * k, "Swiggy", "Food", d + 1, 20),
+            t(250.0 + 40 * (k % 3), "Zomato", "Food", d + 6, 21),
+            t(1800.0 + 700 * (k % 4), "Amazon", "Shopping", d + 9, 11, acct = "4321", bank = "ICICI Bank", type = AcctType.CREDIT_CARD),
+            t(2200.0 + 300 * (k % 2), "Indian Oil", "Fuel", d + 12, 18),
+            t(120.0 + 15 * k, "Sharma General Store", Categories.OTHERS, d + 3, 18),
+            t(450.0, "Gupta Tailors", Categories.OTHERS, d + 14, 17),
+        ) + if (k <= 3) listOf(t(2499.0, "Cult Fit", Categories.OTHERS, d + 5, 7)) else emptyList()
+    }
+
     private fun accountsOf(list: List<Txn>) = list.groupBy { it.accountKey!! }.map { (k, l) ->
         val b = l.filter { it.balance != null }.maxByOrNull { it.timestamp }
         Account(
@@ -106,6 +123,7 @@ class ScreenshotTest {
         accounts = accountsOf(txns),
         txns = txns,
         budgets = mapOf(Categories.TOTAL to 40000.0, "Food" to 700.0, "Shopping" to 3000.0, "Fuel" to 3000.0),
+        all = txns + history,
     )
 
     private fun shot(name: String, dark: Boolean = false, content: @Composable () -> Unit) {
@@ -134,7 +152,7 @@ class ScreenshotTest {
     @Test fun home() = shot("1_home") { WithMonth { HomeScreen(state, {}, {}, {}) } }
     @Test fun homeDark() = shot("1b_home_dark", dark = true) { WithMonth { HomeScreen(state, {}, {}, {}) } }
     @Test fun homeEmpty() = shot("1c_home_empty") { WithMonth { HomeScreen(UiState(), {}, {}, {}) } }
-    @Test fun transactions() = shot("2_transactions") { WithMonth { TransactionsScreen(state) {} } }
+    @Test fun transactions() = shot("2_transactions") { WithMonth { TransactionsScreen(state, onTxn = {}) } }
     @Test fun budgets() = shot("3_budgets") { WithMonth { BudgetScreen(state) {} } }
     @Test fun budgetsEmpty() = shot("3b_budgets_empty") { WithMonth { BudgetScreen(state.copy(budgets = emptyMap())) {} } }
     @Test fun settings() = shot("4_settings") { SettingsScreen({}, {}, {}, {}) }
@@ -180,6 +198,38 @@ class ScreenshotTest {
     }
     @Test fun categories() = shot("9_categories") { CategoriesScreen({ _, _ -> }, {}) }
     @Test fun categoryEditor() = shot("9b_category_editor") { CategoryEditorContent(null, CatType.EXPENSE, { _, _ -> }) }
+    @Test fun txnCategories() = shot("2b_txn_categories") { WithMonth { TransactionsScreen(state, onTxn = {}, tab = 1) } }
+    @Test fun txnMerchants() = shot("2c_txn_merchants") { WithMonth { TransactionsScreen(state, onTxn = {}, tab = 2) } }
+    @Test fun categoryDetail() = shot("14_category_detail") { WithMonth { CategoryDetailScreen(state, "Food", {}, {}) } }
+    @Test fun merchantDetail() = shot("14b_merchant_detail") {
+        WithMonth { MerchantDetailScreen(state, Insights.merchants(state.all).first { it.name == "Swiggy" }, {}) }
+    }
+    @Test fun trends() = shot("15_trends") { TrendsScreen(state, {}, {}, {}) }
+    @Test fun trendsHidden() = shot("15b_trends_income_hidden") {
+        androidx.compose.runtime.CompositionLocalProvider(LocalIncomeHidden provides true) { TrendsScreen(state, {}, {}, {}) }
+    }
+    @Test fun recap() = shot("16_recap") { RecapScreen(state, YearMonth.now().minusMonths(1), {}, {}) }
+    @Test fun homeRecap() = shot("1e_home_recap_prompt") {
+        WithMonth { HomeScreen(state, {}, {}, {}, name = "Rahul", today = LocalDate.now().withDayOfMonth(3)) }
+    }
+    @Test fun categorise() = shot("17_categorise") {
+        CategoriseContent(Insights.uncategorised(state.all), { listOf("Groceries" to 0.71, "Shopping" to 0.18, "Others" to 0.05) }, { _, _ -> })
+    }
+    @Test fun search() = shot("18_search") {
+        SearchScreen("swiggy", {}, state.all.filter { it.merchant == "Swiggy" }.sortedByDescending { it.timestamp }, {})
+    }
+    @Test fun billsRecurring() = shot("12d_bills_recurring") {
+        WithMonth {
+            com.expensetracker.sms.ui.BillsScreen(
+                bills, YearMonth.now(), {}, {}, { _, _ -> },
+                recurring = Insights.detectRecurring(state.all, LocalDate.now()),
+            )
+        }
+    }
+    @Test fun billsCalendar() = shot("12e_bills_calendar") {
+        Column(Modifier.padding(12.dp)) { BillsCalendar(bills, YearMonth.now(), LocalDate.now(), {}) }
+    }
+
     @Test fun budgetSheet() = shot("8_budget_sheet") {
         BudgetEditorContent(null, null, state.byCategory, setOf("Food", "Shopping", "Fuel")) { _, _ -> }
     }

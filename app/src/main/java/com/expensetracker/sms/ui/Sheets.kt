@@ -227,13 +227,14 @@ fun TxnEditorContent(
     var category by remember { mutableStateOf(txn.category) }
     var note by remember { mutableStateOf(txn.note) }
     var ignored by remember { mutableStateOf(txn.ignored) }
+    var tags by remember { mutableStateOf(txn.tags) }
     var applyRule by remember { mutableStateOf(txn.smsKey != null) }
     var showSms by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val initialRule = remember { applyRule }
 
     // No Save button: every change is reported straight away.
-    val current = txn.copy(merchant = merchant.trim().ifBlank { txn.merchant }, category = category, note = note.trim(), ignored = ignored)
+    val current = txn.copy(merchant = merchant.trim().ifBlank { txn.merchant }, category = category, note = note.trim(), ignored = ignored, tags = tags)
     LaunchedEffect(current, applyRule) {
         if (current != txn || applyRule != initialRule) onChange(current, applyRule)
     }
@@ -303,6 +304,9 @@ fun TxnEditorContent(
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth(),
         )
+        Label("Tags")
+        val autoTags = remember(txn.id) { com.expensetracker.sms.Insights.autoTags(txn) }
+        TagsEditor(autoTags, tags) { tags = it }
         Spacer(Modifier.height(8.dp))
         if (category != Categories.SELF) {
             SwitchRow("Exclude from totals", "For refunds, duplicates or reimbursements", ignored) { ignored = it }

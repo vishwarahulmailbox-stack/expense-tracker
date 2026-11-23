@@ -350,7 +350,20 @@ fun PayContent(
         }
 
         if (apps.isNotEmpty()) {
-            FieldLabel(if (vpa.isNotBlank() && vpaError == null) "Or pick an app to pay with" else "Or pay inside a UPI app (Bill payments / BBPS)")
+            val autoFill = vpa.isNotBlank() && vpaError == null && amount != null && amount > 0
+            FieldLabel(if (autoFill) "Or pick an app — payee & ${amount?.let { fmt(it) }} filled in" else "Or open a UPI app")
+            if (!autoFill) {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(12.dp))
+                        .background(AppColors.warning.copy(alpha = 0.12f)).padding(12.dp),
+                ) {
+                    Text(
+                        "Add the payee's UPI ID above to get payee and amount filled in automatically. " +
+                            "Without it the app just opens — pay from its Bill payments / Insurance / BBPS section.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 apps.forEach { app ->
                     Column(
@@ -373,6 +386,12 @@ fun PayContent(
                         app.icon?.let { Image(it.toBitmap(96, 96).asImageBitmap(), null, Modifier.size(32.dp)) }
                         Spacer(Modifier.height(4.dp))
                         Text(app.label, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                        Text(
+                            if (autoFill) "Pay" else "Open",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (autoFill) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }

@@ -64,6 +64,8 @@ fun SettingsScreen(
     onSaveNames: (String) -> Unit = {},
     onDetectSelf: () -> Unit = {},
     onOpenSkipped: () -> Unit = {},
+    aiCorrections: Int = 0,
+    onResetAi: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var confirmClear by remember { mutableStateOf(false) }
@@ -73,25 +75,7 @@ fun SettingsScreen(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
-            AppCard(padding = PaddingValues(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.Rounded.Shield, null, tint = MaterialTheme.colorScheme.onPrimaryContainer) }
-                    Spacer(Modifier.width(14.dp))
-                    Column {
-                        Text("Your data stays on this phone", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            "No account, no internet access, no tracking.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
+        item { AiPrivacyCard(aiCorrections, onResetAi) }
         item {
             SettingsGroup("Categories & detection") {
                 SettingsRow(Icons.Rounded.Category, "Categories", "Create your own, change icons and colours", onClick = onOpenCategories)

@@ -145,6 +145,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
     var editingBill by remember { mutableStateOf<Bill?>(null) }
     var addingBill by remember { mutableStateOf(false) }
     var payBill by remember { mutableStateOf<Bill?>(null) }      // PaySheet open
+    var reviewing by remember { mutableStateOf(false) }          // AI quick-check sheet
     var awaitingUpi by remember { mutableStateOf<Bill?>(null) }  // waiting for the UPI app's result
     val upiLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val b = awaitingUpi ?: return@rememberLauncherForActivityResult
@@ -270,6 +271,8 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     onOpenBudgets = { dest = Dest.Budget },
                     onOpenBills = { dest = Dest.Bills },
                     onPayBill = pay,
+                    reviewCount = vm.reviewQueue.size,
+                    onReview = { reviewing = true },
                 )
                 Dest.Txns -> TransactionsScreen(s, onTxn = { editing = it })
                 Dest.Bills -> BillsScreen(
@@ -311,6 +314,8 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     onSaveNames = vm::saveMyNames,
                     onDetectSelf = vm::detectSelfTransfers,
                     onOpenSkipped = { showSkipped = true },
+                    aiCorrections = vm.aiCorrections.also { LaunchedEffect(Unit) { vm.refreshAiStats() } },
+                    onResetAi = vm::resetAi,
                 )
             }
         }
@@ -351,6 +356,17 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
             onSave = { nt, applyAll -> vm.updateTxn(nt, applyAll); editing = null },
             onDelete = { vm.deleteTxn(t); editing = null },
             onCreateCategory = { vm.saveCategory(it, null) },
+            aiTop = remember(t.id) { if (t.isDebit) vm.aiTop(t.merchant) else emptyList() },
+        )
+    }
+    if (reviewing) {
+        val queue = remember { vm.reviewQueue }
+        AiReviewSheet(
+            items = queue,
+            suggestionsFor = { vm.aiTop(it.merchant) },
+            onDismiss = { reviewing = false },
+            onAnswer = { t, cat -> vm.reviewTxn(t, cat) },
+            onOpenTxn = { reviewing = false; editing = it },
         )
     }
     if (adding) {

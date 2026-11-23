@@ -158,6 +158,21 @@ class ScreenshotTest {
     @Test fun billsScreen() = shot("12_bills") { WithMonth { com.expensetracker.sms.ui.BillsScreen(bills, YearMonth.now(), {}, {}, { _, _ -> }) } }
     @Test fun billEditor() = shot("12b_bill_editor") { com.expensetracker.sms.ui.BillEditorContent(bills[0], {}) }
     @Test fun paySheet() = shot("12c_pay_sheet") { com.expensetracker.sms.ui.PayContent(bills[0], { _, _ -> }, { _, _ -> }) }
+    @Test fun aiReview() = shot("13_ai_review") {
+        com.expensetracker.sms.ui.AiReviewContent(
+            listOf(
+                txns[0].copy(id = 101, merchant = "Kabir Store", category = "Groceries", aiConf = 0.70),
+                txns[0].copy(id = 102, merchant = "Raj Enterprises", category = "Others", aiConf = null),
+                txns[0].copy(id = 103, merchant = "Shiv Shakti Chicken Centre", category = "Groceries", aiConf = 0.78),
+            ),
+            { listOf("Groceries" to 0.7, "Shopping" to 0.2, "Food" to 0.05) },
+            { _, _ -> },
+        )
+    }
+    @Test fun editWithAi() = shot("13b_edit_ai") {
+        TxnEditorContent(txns[0].copy(merchant = "Kabir Store", category = "Groceries", aiConf = 0.70), { _, _ -> }, {}, {},
+            listOf("Groceries" to 0.70, "Shopping" to 0.29, "Health" to 0.01))
+    }
     @Test fun categories() = shot("9_categories") { CategoriesScreen({ _, _ -> }, {}) }
     @Test fun categoryEditor() = shot("9b_category_editor") { CategoryEditorContent(null, CatType.EXPENSE, { _, _ -> }) }
     @Test fun budgetSheet() = shot("8_budget_sheet") {

@@ -28,7 +28,13 @@ data class Txn(
     val balance: Double? = null,
     /** "bank", "app" (payment-app SMS, may be merged into the bank's) or null for manual entries. */
     val source: String? = null,
+    /** Set when the on-device AI picked the category: its confidence (0–1). */
+    val aiConf: Double? = null,
+    /** True once the user confirmed or changed an AI-picked category. */
+    val aiReviewed: Boolean = false,
 ) {
+    val needsReview: Boolean get() = !aiReviewed && aiConf != null && aiConf < CategoryAI.SURE
+
     /** Groups transactions of the same account / card. */
     val accountKey: String? get() = account?.let { "${bank ?: "Account"}|$it" }
 }

@@ -51,6 +51,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch { DataBus.version.collect { reload() } }
+        // Load the on-device model in the background so the first suggestion is instant.
+        viewModelScope.launch(Dispatchers.IO) { runCatching { CategoryAI.predict(app, "warm up") } }
+        // v6: let the on-device AI sort existing "Others" once.
+        if (prefs.getBoolean("imported", false) && !prefs.getBoolean("ai_v6", false)) {
+            viewModelScope.launch {
+                val n = withContext(Dispatchers.IO) { runCatching { CategoryAI.sortOthers(app) }.getOrDefault(0) }
+                prefs.edit().putBoolean("ai_v6", true).apply()
+                if (n > 0) state = state.copy(message = "AI sorted $n transactions from Others")
+                DataBus.bump()
+            }
+        }
         // v4 upgrade: re-read the inbox with the new filters (recovers mandate debits etc.),
         // fill the skipped list and remove payment-app duplicates.
         if (prefs.getBoolean("imported", false) && !prefs.getBoolean("rescan_v4", false)) {
@@ -136,8 +147,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateTxn(edited: Txn, applyToMerchant: Boolean) {
-        val before = state.txns.firstOrNull { it.id == edited.id }
+    fun updateTxn(edited0: Txn, applyToMerchant: Boolean) {
+        val before = state.txns.firstOrNull { it.id == edited0.id }
+        val changed = before != null && before.category != edited0.category
+        // Teach the on-device model: a change is a correction, saving an AI pick unchanged confirms it.
+        if (changed) viewModelScope.launch(Dispatchers.IO) { CategoryAI.learn(getApplication(), edited0.merchant, edited0.category, 1f) }
+        else if (before?.aiConf != null && !before.aiReviewed) viewModelScope.launch(Dispatchers.IO) {
+            CategoryAI.learn(getApplication(), edited0.merchant, edited0.category, 0.5f)
+        }
+        val edited = if (changed || before?.aiConf != null) edited0.copy(aiReviewed = true, aiConf = if (changed) null else edited0.aiConf) else edited0
         val t = when {
             edited.category == Categories.SELF -> edited.copy(ignored = true)
             before != null && before.category == Categories.SELF && before.ignored == edited.ignored -> edited.copy(ignored = false)
@@ -148,6 +166,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // Learn only when the category actually changed, so a note edit doesn't lock a merchant.
             if (applyToMerchant && before?.category != t.category) db.setRule(t.merchant, t.category)
         }
+    }
+
+    // ------------------------------------------------------------ AI
+
+    var aiCorrections by mutableStateOf(0)
+        private set
+
+    fun refreshAiStats() {
+        viewModelScope.launch { aiCorrections = withContext(Dispatchers.IO) { CategoryAI.corrections(getApplication()) } }
+    }
+
+    /** Transactions the AI isn't sure about, plus leftover "Others", for the review card. */
+    val reviewQueue: List<Txn>
+        get() = state.txns.filter { !it.ignored && it.isDebit && (it.needsReview || (it.category == Categories.OTHERS && !it.aiReviewed)) }
+
+    /** Review card: keep or change the category; either way the model learns. */
+    fun reviewTxn(t: Txn, category: String) {
+        val changed = category != t.category
+        io {
+            CategoryAI.learn(getApplication(), t.merchant, category, if (changed) 1f else 0.5f)
+            db.update(t.copy(category = category, aiReviewed = true, aiConf = if (changed) null else t.aiConf))
+        }
+    }
+
+    fun aiTop(merchant: String): List<Pair<String, Double>> =
+        runCatching { CategoryAI.predict(getApplication(), merchant) }.getOrDefault(emptyList())
+
+    fun resetAi() {
+        io { CategoryAI.reset(getApplication()) }
+        aiCorrections = 0
+        state = state.copy(message = "AI learning reset")
     }
 
     fun saveCategory(def: CategoryDef, oldName: String?) {

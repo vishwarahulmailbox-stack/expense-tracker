@@ -16,7 +16,7 @@ object DataBus {
     fun bump() = version.update { it + 1 }
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 5) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 6) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -54,6 +54,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         upgradeToV3(db)
         upgradeToV4(db)
         upgradeToV5(db)
+        upgradeToV6(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -61,6 +62,15 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         if (oldVersion < 3) upgradeToV3(db)
         if (oldVersion < 4) upgradeToV4(db)
         if (oldVersion < 5) upgradeToV5(db)
+        if (oldVersion < 6) upgradeToV6(db)
+    }
+
+    /** v6: on-device AI — confidence per transaction and the user's own learning. */
+    private fun upgradeToV6(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE txns ADD COLUMN ai_conf REAL")
+        db.execSQL("ALTER TABLE txns ADD COLUMN ai_reviewed INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("CREATE TABLE IF NOT EXISTS ml_user(bucket INTEGER NOT NULL, cls TEXT NOT NULL, count REAL NOT NULL, PRIMARY KEY(bucket, cls))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS ml_user_docs(cls TEXT PRIMARY KEY, docs REAL NOT NULL)")
     }
 
     /** v5: bills & reminders. */
@@ -393,6 +403,8 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         put("acct_type", acctType?.name)
         put("balance", balance)
         put("source", source)
+        put("ai_conf", aiConf)
+        put("ai_reviewed", if (aiReviewed) 1 else 0)
     }
 
     private fun Cursor.toTxn() = Txn(
@@ -411,6 +423,8 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         acctType = getString(getColumnIndexOrThrow("acct_type"))?.let { n -> AcctType.entries.firstOrNull { it.name == n } },
         balance = getColumnIndexOrThrow("balance").let { if (isNull(it)) null else getDouble(it) },
         source = getString(getColumnIndexOrThrow("source")),
+        aiConf = getColumnIndexOrThrow("ai_conf").let { if (isNull(it)) null else getDouble(it) },
+        aiReviewed = getInt(getColumnIndexOrThrow("ai_reviewed")) == 1,
     )
 
     /** Returns -1 if this SMS was already saved. */
@@ -447,6 +461,8 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         writableDatabase.delete("accounts", null, null)
         writableDatabase.delete("skipped", null, null)
         writableDatabase.delete("bills", null, null)
+        writableDatabase.delete("ml_user", null, null)
+        writableDatabase.delete("ml_user_docs", null, null)
     }
 
     fun budgets(): Map<String, Double> =

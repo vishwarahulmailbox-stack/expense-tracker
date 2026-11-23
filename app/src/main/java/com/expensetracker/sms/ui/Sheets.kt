@@ -193,8 +193,9 @@ fun EditTxnSheet(
     onSave: (Txn, Boolean) -> Unit,
     onDelete: () -> Unit,
     onCreateCategory: (CategoryDef) -> Unit,
+    aiTop: List<Pair<String, Double>> = emptyList(),
 ) {
-    Sheet(onDismiss) { TxnEditorContent(txn, onSave, onDelete, onCreateCategory) }
+    Sheet(onDismiss) { TxnEditorContent(txn, onSave, onDelete, onCreateCategory, aiTop) }
 }
 
 @Composable
@@ -203,6 +204,7 @@ fun TxnEditorContent(
     onSave: (Txn, Boolean) -> Unit,
     onDelete: () -> Unit,
     onCreateCategory: (CategoryDef) -> Unit = {},
+    aiTop: List<Pair<String, Double>> = emptyList(),
 ) {
     var creating by remember { mutableStateOf(false) }
     var merchant by remember { mutableStateOf(txn.merchant) }
@@ -250,6 +252,10 @@ fun TxnEditorContent(
         )
 
         Label("Category")
+        if (txn.isDebit && aiTop.isNotEmpty()) {
+            AiSuggestions(aiTop.take(3), category, txn.aiConf != null && !txn.aiReviewed) { category = it }
+            Spacer(Modifier.height(10.dp))
+        }
         CategoryGrid(category, Categories.forDirection(txn.isDebit), onAddNew = { creating = true }) { category = it }
         if (category == Categories.SELF) {
             Text(

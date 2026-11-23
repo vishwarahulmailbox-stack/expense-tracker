@@ -60,7 +60,16 @@ object SmsImporter {
         force: Boolean = false,
     ): Boolean {
         val db = Db.get(ctx)
-        val category = Categorizer.categorize(p.merchant, body, p.isDebit, db.ruleFor(p.merchant))
+        val rule = db.ruleFor(p.merchant)
+        var category = Categorizer.categorize(p.merchant, body, p.isDebit, rule)
+        // Rules found nothing: ask the on-device model (merchant name only, never leaves the phone).
+        var aiConf: Double? = null
+        if (p.isDebit && rule == null && category == Categories.OTHERS) {
+            runCatching { CategoryAI.suggest(ctx, p.merchant) }.getOrNull()?.let { (cat, conf) ->
+                category = cat
+                aiConf = conf
+            }
+        }
         var t = Txn(
             smsKey = key(addr, body),
             amount = p.amount,
@@ -74,6 +83,7 @@ object SmsImporter {
             acctType = if (p.fromApp) null else p.acctType,
             balance = if (p.fromApp) null else p.balance,
             source = if (p.fromApp) "app" else "bank",
+            aiConf = aiConf,
         )
 
         // A payment-app SMS for a payment the bank already reported: just improve the bank's entry.

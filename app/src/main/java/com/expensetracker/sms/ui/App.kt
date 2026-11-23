@@ -182,6 +182,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
     val sub = stack.lastOrNull()
     var txTab by rememberSaveable { mutableIntStateOf(0) }
     var categorising by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val open: (Sub) -> Unit = { stack.add(it) }
     val inSubScreen = sub != null || (dest == Dest.Settings && (showCategories || showSkipped)) || (dest == Dest.Accounts && selectedAccount != null)
@@ -408,16 +409,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     SkippedScreen(vm.skipped, onAdd = vm::addSkippedAsTxn, onDismiss = vm::dismissSkipped, onClearAll = vm::clearSkipped)
                 } else SettingsScreen(
                     onRescan = { vm.importSms(firstTime = false) },
-                    onExport = { reveal {
-                        vm.exportCsv { uri ->
-                            if (uri == null) return@exportCsv
-                            val send = Intent(Intent.ACTION_SEND)
-                                .setType("text/csv")
-                                .putExtra(Intent.EXTRA_STREAM, uri)
-                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            ctx.startActivity(Intent.createChooser(send, "Export expenses").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }
-                    } },
+                    onExport = { exporting = true },
                     onClearAll = vm::clearAll,
                     onPrivacy = onPrivacy,
                     onOpenCategories = { showCategories = true },
@@ -435,6 +427,15 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
         }
     }
 
+    if (exporting) {
+        ExportSheet(
+            onDismiss = { exporting = false },
+            onExport = { range, sms, skipped ->
+                exporting = false
+                reveal { vm.exportData(range, sms, skipped) { share(it, "text/csv", "Export expenses") } }
+            },
+        )
+    }
     if (categorising) {
         val groups = remember { com.expensetracker.sms.Insights.uncategorised(s.all) }
         CategoriseSheet(

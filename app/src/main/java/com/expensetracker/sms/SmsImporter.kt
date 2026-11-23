@@ -166,7 +166,7 @@ object SmsImporter {
         // Second pass: accounts seen later in the scan can reveal earlier self transfers.
         SelfTransfer.scanAll(ctx)
         Dedupe.scanAll(ctx)
-        Db.get(ctx).pruneSkipped()
+        Db.get(ctx).pruneSkipped(maxOf(400, days))
         return count
     }
 }

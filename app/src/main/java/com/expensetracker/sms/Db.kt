@@ -228,7 +228,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
     }
 
     /** Keep the skipped list small: drop entries older than [days]. */
-    fun pruneSkipped(days: Int = 120) {
+    fun pruneSkipped(days: Int = 400) {
         val cutoff = System.currentTimeMillis() - days * 86_400_000L
         writableDatabase.delete("skipped", "ts<?", arrayOf(cutoff.toString()))
     }

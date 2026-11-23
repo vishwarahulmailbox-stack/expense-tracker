@@ -1204,3 +1204,91 @@ fun RecurringCard(r: com.expensetracker.sms.RecurringSuggestion, onYes: () -> Un
         }
     }
 }
+
+// ------------------------------------------------------------------ Settings → Export
+
+@Composable
+fun ExportSheet(onDismiss: () -> Unit, onExport: (com.expensetracker.sms.ExportRange, Boolean, Boolean) -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+    ) { ExportContent(onExport) }
+}
+
+@Composable
+fun ExportContent(onExport: (com.expensetracker.sms.ExportRange, Boolean, Boolean) -> Unit) {
+    var range by remember { mutableStateOf(com.expensetracker.sms.ExportRange.LAST_12) }
+    var sms by remember { mutableStateOf(true) }
+    var skipped by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 16.dp)) {
+        Text("Export data", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "A CSV file for Excel, Google Sheets or your own analysis. It's made on this phone and goes only where you share it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text("Period", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.expensetracker.sms.ExportRange.entries.forEach { r ->
+                val on = r == range
+                Text(
+                    r.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer)
+                        .clickable { range = r }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
+        if (range != com.expensetracker.sms.ExportRange.THIS_MONTH) {
+            Text(
+                "Older SMS still in your inbox are read first, so nothing is missed. This can take a few seconds.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        ExportSwitch("Include original SMS text", "Adds an SMS column. Handy for training or checking the parser.", sms) { sms = it }
+        ExportSwitch("Include skipped bank messages", "Reminders, offers, failed payments… with the reason they weren't counted. OTPs and personal messages are never saved, so they're never exported.", skipped) { skipped = it }
+        Spacer(Modifier.height(16.dp))
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.fillMaxWidth().clip(CircleShape).clickable { onExport(range, sms, skipped) },
+        ) {
+            Text(
+                "Export ${range.label.lowercase()}",
+                color = MaterialTheme.colorScheme.onPrimary,
+                style = MaterialTheme.typography.labelLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(vertical = 14.dp),
+            )
+        }
+        Text(
+            "Includes income, so your screen lock is asked first.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun ExportSwitch(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = onChange)
+    }
+}

@@ -41,6 +41,23 @@ data class UiState(
     val selfTransfers: List<Txn> get() = txns.filter { it.category == Categories.SELF }
 }
 
+enum class ExportRange(val label: String, val fileTag: String) {
+    THIS_MONTH("This month", "month"),
+    LAST_3("Last 3 months", "3m"),
+    LAST_12("Last 12 months", "12m"),
+    THIS_YEAR("This year", "year"),
+    ALL("Everything", "all");
+
+    /** First day included; null = everything on the phone. */
+    fun start(today: LocalDate): LocalDate? = when (this) {
+        THIS_MONTH -> today.withDayOfMonth(1)
+        LAST_3 -> today.minusMonths(3).plusDays(1)
+        LAST_12 -> today.minusMonths(12).plusDays(1)
+        THIS_YEAR -> today.withDayOfYear(1)
+        ALL -> null
+    }
+}
+
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val db = Db.get(app)
     private val prefs = app.getSharedPreferences("prefs", Context.MODE_PRIVATE)
@@ -402,6 +419,72 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Writes all transactions to a CSV in the cache folder and returns a shareable Uri. */
     fun exportCsv(onReady: (Uri?) -> Unit) = exportCsv(null, null, onReady)
+
+    /**
+     * Settings → Export: any period, optionally with the original SMS text and the skipped
+     * (non-transaction) bank messages. Scans older SMS first when the period goes further back
+     * than what was imported. OTPs and personal messages are never stored, so never exported.
+     */
+    fun exportData(range: ExportRange, includeSms: Boolean, includeSkipped: Boolean, onReady: (Uri?) -> Unit) {
+        if (state.busy) return
+        val today = LocalDate.now()
+        val start = range.start(today)
+        val days = start?.let { java.time.temporal.ChronoUnit.DAYS.between(it, today).toInt() + 1 } ?: 3650
+        state = state.copy(busy = true, message = if (days > 90) "Reading SMS for ${range.label.lowercase()}…" else null)
+        viewModelScope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                runCatching {
+                    val app = getApplication<Application>()
+                    if (days > 90) SmsImporter.importInbox(app, days)
+                    val fromTs = start?.atStartOfDay(java.time.ZoneId.systemDefault())?.toInstant()?.toEpochMilli() ?: 0L
+                    val dir = File(app.cacheDir, "exports").apply { mkdirs() }
+                    val file = File(dir, "expenses-${range.fileTag}-$today.csv")
+                    fun q(v: String) = "\"" + v.replace("\"", "\"\"") + "\""
+                    file.bufferedWriter().use { w ->
+                        val head = mutableListOf("Date", "Time", "Type", "Amount", "Merchant", "Category", "Picked by", "Bank", "Account", "Tags", "Note", "Excluded")
+                        if (includeSms) head += "SMS"
+                        w.write("\uFEFF" + head.joinToString(",") + "\n") // BOM so Excel shows ₹ and Hindi text correctly
+                        val tf = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+                        db.allTxns().filter { it.timestamp >= fromTs }.sortedBy { it.timestamp }.forEach { t ->
+                            val at = java.time.Instant.ofEpochMilli(t.timestamp).atZone(java.time.ZoneId.systemDefault())
+                            val cells = mutableListOf(
+                                at.toLocalDate().toString(), at.format(tf),
+                                if (t.isDebit) "Expense" else "Income",
+                                "%.2f".format(Locale.US, t.amount),
+                                t.merchant, t.category,
+                                when {
+                                    t.smsKey == null -> "Manual"
+                                    t.aiReviewed -> "You"
+                                    t.aiConf != null -> "AI " + Math.round(t.aiConf * 100) + "%"
+                                    else -> "Auto"
+                                },
+                                t.bank ?: "", t.account ?: "",
+                                t.tags.joinToString(" ") { "#$it" }, t.note,
+                                if (t.ignored) "Yes" else "No",
+                            )
+                            if (includeSms) cells += t.body.replace('\n', ' ')
+                            w.write(cells.joinToString(",") { q(it) } + "\n")
+                        }
+                        if (includeSkipped) {
+                            db.skipped(100_000).filter { it.timestamp >= fromTs }.sortedBy { it.timestamp }.forEach { k ->
+                                val at = java.time.Instant.ofEpochMilli(k.timestamp).atZone(java.time.ZoneId.systemDefault())
+                                val cells = mutableListOf(
+                                    at.toLocalDate().toString(), at.format(tf), "Skipped", "", k.sender, k.reason.label,
+                                    "Auto", "", "", "", "", "Yes",
+                                )
+                                if (includeSms) cells += k.body.replace('\n', ' ')
+                                w.write(cells.joinToString(",") { q(it) } + "\n")
+                            }
+                        }
+                    }
+                    FileProvider.getUriForFile(app, app.packageName + ".files", file)
+                }.getOrNull()
+            }
+            state = state.copy(busy = false, message = if (uri == null) "Export failed" else null)
+            DataBus.bump()
+            onReady(uri)
+        }
+    }
 
     /** CSV of everything, or of one month / one account. */
     fun exportCsv(month: YearMonth?, accountKey: String?, onReady: (Uri?) -> Unit) {

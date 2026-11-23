@@ -119,7 +119,7 @@ fun SettingsScreen(
                 Divider()
                 SettingsRow(Icons.Rounded.MarkEmailUnread, "Skipped messages", "Money SMS that weren't counted, and why", onClick = onOpenSkipped)
                 Divider()
-                SettingsRow(Icons.Rounded.FileDownload, "Export to CSV", "Open in Excel or Google Sheets", onClick = onExport)
+                SettingsRow(Icons.Rounded.FileDownload, "Export data", "CSV of any period, with SMS text if you want", onClick = onExport)
                 Divider()
                 SettingsRow(
                     Icons.Rounded.DeleteForever, "Delete all data", "Remove all transactions, budgets and rules",

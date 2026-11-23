@@ -7,7 +7,13 @@ Training data is generated, not collected: brand and shop-type words from Catego
 combined with common Indian shop-name and person-name patterns. No user data is used.
 
 Run:  python3 scripts/train_category_model.py
+      python3 scripts/train_category_model.py --extra-csv my-export.csv   # add your own labels
+
+--extra-csv takes the CSV from the app (Settings → Export data). Only rows you categorised
+yourself ("Picked by" = You or Auto) are used, and payments to people (Transfers / Self transfer)
+are left out, so personal names don't end up inside the model that ships in the APK.
 """
+import csv
 import math, random, re, struct, sys
 from collections import defaultdict
 from pathlib import Path
@@ -194,8 +200,25 @@ UNSEEN = [
     ("Tirupati Finance", "EMI/Loan"), ("Star Securities", "Investment"), ("Hanuman Mandir Trust", "Gifts & donations"), ("Laxmi Gas Agency", "Bills"),
 ]
 
+def extra_rows(path):
+    rows = []
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            if r.get("Type") != "Expense" or r.get("Picked by", "Auto") not in ("You", "Auto"):
+                continue
+            cat, name = r.get("Category", "").strip(), r.get("Merchant", "").strip()
+            if not name or cat in ("", "Others", "Transfers", "Self transfer"):
+                continue
+            if cat not in CLASSES:
+                CLASSES.append(cat)
+            rows += [(name, cat)] * 3   # your own labels count a bit more than generated ones
+    print(f"extra rows from {path}: {len(rows) // 3}")
+    return rows
+
 def main():
     data = build()
+    if "--extra-csv" in sys.argv:
+        data += extra_rows(sys.argv[sys.argv.index("--extra-csv") + 1])
     random.shuffle(data)
     cut = int(len(data) * 0.9)
     model = train(data[:cut])

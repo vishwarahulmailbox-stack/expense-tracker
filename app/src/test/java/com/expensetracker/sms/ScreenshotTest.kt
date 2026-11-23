@@ -230,6 +230,8 @@ class ScreenshotTest {
         Column(Modifier.padding(12.dp)) { BillsCalendar(bills, YearMonth.now(), LocalDate.now(), {}) }
     }
 
+    @Test fun exportSheet() = shot("4b_export_sheet") { ExportContent { _, _, _ -> } }
+
     @Test fun budgetSheet() = shot("8_budget_sheet") {
         BudgetEditorContent(null, null, state.byCategory, setOf("Food", "Shopping", "Fuel")) { _, _ -> }
     }

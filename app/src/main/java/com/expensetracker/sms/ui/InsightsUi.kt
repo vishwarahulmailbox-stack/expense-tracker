@@ -179,7 +179,8 @@ fun MonthBars(
     color: Color = MaterialTheme.colorScheme.primary,
 ) {
     val lineColor = AppColors.income
-    val max = maxOf(values.maxOrNull() ?: 0.0, line?.maxOrNull() ?: 0.0).coerceAtLeast(1.0)
+    // a little headroom when a line is drawn, so it never sits on the value labels
+    val max = maxOf(values.maxOrNull() ?: 0.0, line?.maxOrNull() ?: 0.0).coerceAtLeast(1.0) * (if (line != null) 1.15 else 1.0)
     val muted = color.copy(alpha = 0.35f)
     Box(modifier) {
         Row {
@@ -245,6 +246,10 @@ private fun StatCell(label: String, value: String, modifier: Modifier = Modifier
 private fun ChangeText(now: Double, before: Double, prevLabel: String) {
     if (before <= 0) return
     val pct = Math.round((now - before) / before * 100)
+    if (pct == 0L) {
+        Text("About the same as $prevLabel", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
     val up = pct > 0
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(if (up) Icons.Rounded.TrendingUp else Icons.Rounded.TrendingDown, null, Modifier.size(16.dp), tint = if (up) AppColors.danger else AppColors.income)
@@ -337,7 +342,7 @@ fun CategoriesTab(
                                 } else {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            "${counts[cat] ?: 0} payments · ${Math.round(amt / total * 100)}%",
+                                            "${counts[cat] ?: 0} payment${if ((counts[cat] ?: 0) == 1) "" else "s"} · ${Math.round(amt / total * 100)}%",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.weight(1f),
@@ -867,7 +872,7 @@ fun RecapScreen(s: UiState, month: YearMonth, onTxn: (Txn) -> Unit, onCategory: 
                 }
             }
         }
-        r.topMerchant?.let { m ->
+        r.topMerchant?.takeIf { it.count >= 2 }?.let { m ->
             item {
                 AppCard(padding = PaddingValues(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

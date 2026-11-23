@@ -16,7 +16,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import com.expensetracker.sms.Txn
+import androidx.compose.material3.TextButton
 import android.content.ActivityNotFoundException
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.rounded.EventNote

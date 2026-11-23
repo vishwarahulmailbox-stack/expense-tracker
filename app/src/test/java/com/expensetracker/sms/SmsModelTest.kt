@@ -33,7 +33,8 @@ class SmsModelTest {
     }
 
     @Test fun staysUnsureWhenTheSmsSaysNothing() {
-        val p = top("A/c *6081 Debited for Rs:64.08 on 15-01-2026 22:31:18 by Mob Bk ref no 419613442486 Avl Bal Rs:369697.54.If not you, Call 3596721962 -Union Bank of India")
-        assertTrue(p.first == Categories.OTHERS || p.second < CategoryAI.APPLY)
+        // Nothing but bank boilerplate: no features at all, so no guess.
+        val p = model.predict("A/c *6081 Debited for Rs:64.08 on 15-01-2026 22:31:18 by Mob Bk ref no 419613442486 Avl Bal Rs:369697.54.If not you, Call 3596721962 -Union Bank of India").firstOrNull()
+        assertTrue(p == null || p.first == Categories.OTHERS || p.second < CategoryAI.APPLY)
     }
 }

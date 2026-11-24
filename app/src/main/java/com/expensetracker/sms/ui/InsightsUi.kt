@@ -1065,20 +1065,31 @@ fun Greeting(name: String?, month: YearMonth) {
     }
 }
 
+/** Top-bar title on Home: "Hi Rahul" or "Good evening". */
+fun greetingTitle(name: String?): String {
+    val hour = java.time.LocalTime.now().hour
+    val hello = when (hour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        else -> "Good evening"
+    }
+    return if (name != null) "Hi $name" else hello
+}
+
+/** Slim row of shortcuts: icon + label in one line. */
 @Composable
 fun ShortcutRow(items: List<Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit>>) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { (label, icon, onClick) ->
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
+            Row(
+                Modifier.weight(1f).height(40.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLowest).clickable(onClick = onClick),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.height(4.dp))
-                    Text(label, style = MaterialTheme.typography.labelMedium)
-                }
+                Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(6.dp))
+                Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
             }
         }
     }

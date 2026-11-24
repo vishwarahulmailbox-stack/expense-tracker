@@ -179,11 +179,14 @@ class ScreenshotTest {
     @Test fun aiReview() = shot("13_ai_review") {
         com.expensetracker.sms.ui.AiReviewContent(
             listOf(
+                txns[0].copy(id = 100, merchant = "Rajen", category = "Others", aiConf = null, amount = 20.0,
+                    body = "Union Bank of India A/c*6081 Dr Rs20.00 on 22-11-26 19:05 by MB 837367227230 Fv.Rajen, Bal Rs15897.36 Not U?Call 66013348/SMS BLOCK 1607 to 7637009924"),
+                txns[0].copy(id = 99, merchant = "Rajen", category = "Others", aiConf = null, amount = 40.0),
                 txns[0].copy(id = 101, merchant = "Kabir Store", category = "Groceries", aiConf = 0.70),
                 txns[0].copy(id = 102, merchant = "Raj Enterprises", category = "Others", aiConf = null),
                 txns[0].copy(id = 103, merchant = "Shiv Shakti Chicken Centre", category = "Groceries", aiConf = 0.78),
             ),
-            { listOf("Groceries" to 0.7, "Shopping" to 0.2, "Food" to 0.05) },
+            { listOf("Transfers" to 0.62, "Groceries" to 0.2, "Food" to 0.08) },
             { _, _ -> },
         )
     }

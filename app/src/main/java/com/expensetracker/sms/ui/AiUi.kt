@@ -33,6 +33,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.mutableIntStateOf
+import com.expensetracker.sms.Categories
+import com.expensetracker.sms.Insights
+import com.expensetracker.sms.dayLabel
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -101,9 +109,9 @@ fun AiReviewCard(count: Int, onOpen: () -> Unit) {
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("Check $count categor${if (count == 1) "y" else "ies"}", style = MaterialTheme.typography.titleSmall)
+            Text("Quick check: $count payee${if (count == 1) "" else "s"}", style = MaterialTheme.typography.titleSmall)
             Text(
-                "The on-device AI wasn't sure. Each answer makes it smarter.",
+                "One tap each. The on-device AI learns from every answer.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -135,74 +143,137 @@ fun AiReviewContent(
     onOpenTxn: (Txn) -> Unit = {},
     onDone: () -> Unit = {},
 ) {
-    // Answered rows disappear locally right away.
-    val answered = remember { mutableStateMapOf<Long, String>() }
-    val left = items.filter { it.id !in answered }
-    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
-        Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+    // One question per merchant: answering once covers all its payments.
+    val groups = remember(items) {
+        items.groupBy { Insights.merchantKey(it.merchant).ifEmpty { it.merchant } }
+            .values.map { g -> g.sortedByDescending { it.timestamp } }
+            .sortedByDescending { g -> g.size }
+    }
+    var index by remember { mutableIntStateOf(0) }
+    val total = groups.size
+    val answer: (List<Txn>, String) -> Unit = { g, cat -> g.forEach { onAnswer(it, cat) }; index++ }
+
+    Column(Modifier.fillMaxWidth().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.AutoAwesome, null, tint = AiPurple)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text("Quick check", style = MaterialTheme.typography.titleLarge)
-                Text("${left.size} left · tap the right category", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (left.isEmpty()) TextButton(onClick = onDone) { Text("Done") }
-        }
-        Spacer(Modifier.height(8.dp))
-        if (left.isEmpty()) {
-            EmptyState(Icons.Rounded.Check, "All checked 🎉", "Thanks! The AI learned from your answers — on this phone only.")
-        }
-        LazyColumn(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.height(if (left.isEmpty()) 0.dp else 520.dp),
-        ) {
-            items(left, key = { it.id }) { t ->
-                ReviewRow(t, suggestionsFor(t), onPick = { cat -> answered[t.id] = cat; onAnswer(t, cat) }, onMore = { onOpenTxn(t) })
-            }
-        }
-        Row(
-            Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.Lock, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "AI runs on this phone. Your messages are never uploaded.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ReviewRow(t: Txn, top: List<Pair<String, Double>>, onPick: (String) -> Unit, onMore: () -> Unit) {
-    val options = (listOf(t.category to (t.aiConf ?: 0.0)) + top).distinctBy { it.first }.take(4)
-    AppCard(padding = PaddingValues(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CategoryBadge(t.category, 36.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(t.merchant, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${fmt(t.amount)} · now: ${t.category}" + (t.aiConf?.let { " (${(it * 100).roundToInt()}% sure)" } ?: ""),
-                    style = MaterialTheme.typography.labelSmall,
+                    if (index < total) "${index + 1} of $total · each answer teaches the AI" else "All done",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            TextButton(onClick = onDone) { Text(if (index < total) "Later" else "Done") }
         }
         Spacer(Modifier.height(8.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            options.forEach { (cat, _) ->
-                FilterChip(
-                    selected = false,
-                    onClick = { onPick(cat) },
-                    label = { Text(if (cat == t.category) "✓ $cat" else cat) },
-                    leadingIcon = { Icon(categoryIcon(cat), null, Modifier.size(16.dp)) },
-                )
+        LinearProgressIndicator(
+            progress = { if (total == 0) 1f else index.toFloat() / total },
+            modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+            color = AiPurple,
+            trackColor = AiPurple.copy(alpha = 0.12f),
+        )
+        Spacer(Modifier.height(14.dp))
+        if (index >= total) {
+            EmptyState(Icons.Rounded.Check, "All checked 🎉", "Thanks! The AI learned from your answers, on this phone only.")
+            return@Column
+        }
+        val g = groups[index]
+        val t = g.first()
+        val top = remember(t.id) { suggestionsFor(t).filter { it.first != Categories.OTHERS && it.first != t.category }.take(3) }
+
+        // The payment
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+                .clickable { onOpenTxn(t) }.padding(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CategoryBadge(t.category, 44.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(t.merchant, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        (if (g.size > 1) "${g.size} payments · ${fmt(g.sumOf { it.amount })}" else fmt(t.amount)) +
+                            " · " + dayLabel(t.timestamp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(t.category, style = MaterialTheme.typography.labelLarge)
+                }
             }
-            TextButton(onClick = onMore) { Text("Other…") }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                t.body.replace(Regex("\\s+"), " "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLowest).padding(10.dp),
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+
+        if (top.isNotEmpty()) {
+            Text("AI thinks it's", style = MaterialTheme.typography.labelLarge, color = AiPurple)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                top.forEachIndexed { i, (cat, p) ->
+                    val first = i == 0
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                            .background(if (first) AiPurple else AiPurple.copy(alpha = 0.08f))
+                            .clickable { answer(g, cat) }
+                            .padding(vertical = 10.dp, horizontal = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(categoryIcon(cat), null, Modifier.size(20.dp), tint = if (first) Color.White else AiPurple)
+                        Spacer(Modifier.height(4.dp))
+                        Text(cat, style = MaterialTheme.typography.labelMedium, color = if (first) Color.White else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${(p * 100).roundToInt()}%", style = MaterialTheme.typography.labelSmall, color = if (first) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+        }
+
+        Text(if (top.isEmpty()) "Pick a category" else "Or pick another", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Categories.expense.filter { it != t.category && it !in top.map { x -> x.first } }.forEach { cat ->
+                Row(
+                    Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer)
+                        .clickable { answer(g, cat) }.padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(categoryIcon(cat), null, Modifier.size(16.dp), tint = Categories.color(cat))
+                    Spacer(Modifier.width(6.dp))
+                    Text(cat, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { index++ }) { Text("Skip") }
+            Spacer(Modifier.weight(1f))
+            OutlinedButton(onClick = { answer(g, t.category) }) {
+                Icon(Icons.Rounded.Check, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Keep ${t.category}")
+            }
+        }
+        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Lock, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (g.size > 1) "Applies to all ${g.size} payments to this merchant. AI runs on this phone." else "AI runs on this phone. Your messages are never uploaded.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

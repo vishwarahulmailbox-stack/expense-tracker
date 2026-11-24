@@ -93,7 +93,6 @@ fun HomeScreen(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item { Greeting(name, s.month) }
         item { HeroCard(s, onOpenBudgets) }
         item {
             ShortcutRow(
@@ -101,7 +100,6 @@ fun HomeScreen(
                     Triple("Trends", Icons.Rounded.Insights, onTrends),
                     Triple("Categories", Icons.Rounded.PieChart, onCategories),
                     Triple("Recap", Icons.Rounded.EmojiEvents, { onRecap(if (lastMonthSpent > 0) lastMonth else s.month) }),
-                    Triple("Search", Icons.Rounded.Search, onSearch),
                 )
             )
         }

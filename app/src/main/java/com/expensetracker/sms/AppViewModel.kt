@@ -257,6 +257,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun aiTop(merchant: String): List<Pair<String, Double>> =
         runCatching { CategoryAI.predict(getApplication(), merchant) }.getOrDefault(emptyList())
 
+    /** Guesses for one payment, reading its SMS too. */
+    fun aiTopFor(t: Txn): List<Pair<String, Double>> =
+        runCatching { CategoryAI.predict(getApplication(), t.merchant, t.body) }.getOrDefault(emptyList())
+
     fun resetAi() {
         io { CategoryAI.reset(getApplication()) }
         aiCorrections = 0

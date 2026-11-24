@@ -281,7 +281,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                             dest == Dest.Settings && showSkipped -> "Skipped messages"
                             dest == Dest.Accounts && selectedAccount != null ->
                                 s.accounts.firstOrNull { it.key == selectedAccount }?.let { it.nickname ?: it.bank } ?: "Account"
-                            dest == Dest.Home -> "Overview"
+                            dest == Dest.Home -> greetingTitle(vm.firstName)
                             else -> dest.label
                         },
                         style = MaterialTheme.typography.titleLarge,
@@ -364,7 +364,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     onOpenBudgets = { dest = Dest.Budget },
                     onOpenBills = { dest = Dest.Bills },
                     onPayBill = pay,
-                    reviewCount = vm.reviewQueue.size,
+                    reviewCount = vm.reviewQueue.distinctBy { com.expensetracker.sms.Insights.merchantKey(it.merchant).ifEmpty { it.merchant } }.size,
                     onReview = { reviewing = true },
                     name = vm.firstName,
                     onTrends = { open(Sub.Trends) },
@@ -489,7 +489,7 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
         val queue = remember { vm.reviewQueue }
         AiReviewSheet(
             items = queue,
-            suggestionsFor = { vm.aiTop(it.merchant) },
+            suggestionsFor = { vm.aiTopFor(it) },
             onDismiss = { reviewing = false },
             onAnswer = { t, cat -> vm.reviewTxn(t, cat) },
             onOpenTxn = { reviewing = false; editing = it },

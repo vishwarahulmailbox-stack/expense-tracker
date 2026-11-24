@@ -34,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.remember
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -199,8 +200,14 @@ fun ThinProgress(
     height: Dp = 6.dp,
     track: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
 ) {
+    // Bars fill in once when they appear and glide when the value changes.
+    val target = ratio.coerceIn(0.0, 1.0).toFloat()
+    val anim = remember { androidx.compose.animation.core.Animatable(0f) }
+    androidx.compose.runtime.LaunchedEffect(target) {
+        anim.animateTo(target, androidx.compose.animation.core.tween(durationMillis = 600, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    }
     LinearProgressIndicator(
-        progress = { ratio.coerceIn(0.0, 1.0).toFloat() },
+        progress = { anim.value },
         modifier = modifier.fillMaxWidth().height(height).clip(CircleShape),
         color = color,
         trackColor = track,

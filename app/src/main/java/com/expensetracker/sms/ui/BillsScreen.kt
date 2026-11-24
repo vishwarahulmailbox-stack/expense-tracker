@@ -160,7 +160,7 @@ fun BillsScreen(
                     EmptyState(
                         Icons.Rounded.ReceiptLong,
                         when (filter) {
-                            "overdue" -> "Nothing overdue 🎉"
+                            "overdue" -> "Nothing overdue"
                             "paid" -> "No bills paid this month"
                             else -> "No upcoming bills"
                         },

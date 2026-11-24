@@ -33,6 +33,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +50,7 @@ import com.expensetracker.sms.Insights
 import com.expensetracker.sms.dayLabel
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -176,101 +184,113 @@ fun AiReviewContent(
         )
         Spacer(Modifier.height(14.dp))
         if (index >= total) {
-            EmptyState(Icons.Rounded.Check, "All checked 🎉", "Thanks! The AI learned from your answers, on this phone only.")
+            EmptyState(Icons.Rounded.Check, "All checked", "Thanks! The AI learned from your answers, on this phone only.")
             return@Column
         }
-        val g = groups[index]
-        val t = g.first()
-        val top = remember(t.id) { suggestionsFor(t).filter { it.first != Categories.OTHERS && it.first != t.category }.take(3) }
+        // Next payee slides in from the right; the answered one slides out to the left.
+        AnimatedContent(
+            targetState = index,
+            transitionSpec = {
+                (slideInHorizontally(tween(260)) { it / 4 } + fadeIn(tween(260))) togetherWith
+                    (slideOutHorizontally(tween(160)) { -it / 4 } + fadeOut(tween(160)))
+            },
+            label = "quick-check",
+        ) { i ->
+          if (i < total) Column {
+                val g = groups[i]
+                val t = g.first()
+                val top = remember(t.id) { suggestionsFor(t).filter { it.first != Categories.OTHERS && it.first != t.category }.take(3) }
 
-        // The payment
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
-                .clickable { onOpenTxn(t) }.padding(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CategoryBadge(t.category, 44.dp)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(t.merchant, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                // The payment
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+                        .clickable { onOpenTxn(t) }.padding(14.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CategoryBadge(t.category, 44.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(t.merchant, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                (if (g.size > 1) "${g.size} payments · ${fmt(g.sumOf { it.amount })}" else fmt(t.amount)) +
+                                    " · " + dayLabel(t.timestamp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(t.category, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
                     Text(
-                        (if (g.size > 1) "${g.size} payments · ${fmt(g.sumOf { it.amount })}" else fmt(t.amount)) +
-                            " · " + dayLabel(t.timestamp),
+                        t.body.replace(Regex("\\s+"), " "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerLowest).padding(10.dp),
                     )
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(t.category, style = MaterialTheme.typography.labelLarge)
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                t.body.replace(Regex("\\s+"), " "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerLowest).padding(10.dp),
-            )
-        }
-        Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(14.dp))
 
-        if (top.isNotEmpty()) {
-            Text("AI thinks it's", style = MaterialTheme.typography.labelLarge, color = AiPurple)
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                top.forEachIndexed { i, (cat, p) ->
-                    val first = i == 0
-                    Column(
-                        Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                            .background(if (first) AiPurple else AiPurple.copy(alpha = 0.08f))
-                            .clickable { answer(g, cat) }
-                            .padding(vertical = 10.dp, horizontal = 6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(categoryIcon(cat), null, Modifier.size(20.dp), tint = if (first) Color.White else AiPurple)
-                        Spacer(Modifier.height(4.dp))
-                        Text(cat, style = MaterialTheme.typography.labelMedium, color = if (first) Color.White else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${(p * 100).roundToInt()}%", style = MaterialTheme.typography.labelSmall, color = if (first) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant)
+                if (top.isNotEmpty()) {
+                    Text("AI thinks it's", style = MaterialTheme.typography.labelLarge, color = AiPurple)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        top.forEachIndexed { i, (cat, p) ->
+                            val first = i == 0
+                            Column(
+                                Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                                    .background(if (first) AiPurple else AiPurple.copy(alpha = 0.08f))
+                                    .clickable { answer(g, cat) }
+                                    .padding(vertical = 10.dp, horizontal = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(categoryIcon(cat), null, Modifier.size(20.dp), tint = if (first) Color.White else AiPurple)
+                                Spacer(Modifier.height(4.dp))
+                                Text(cat, style = MaterialTheme.typography.labelMedium, color = if (first) Color.White else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${(p * 100).roundToInt()}%", style = MaterialTheme.typography.labelSmall, color = if (first) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                }
+
+                Text(if (top.isEmpty()) "Pick a category" else "Or pick another", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(6.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Categories.expense.filter { it != t.category && it !in top.map { x -> x.first } }.forEach { cat ->
+                        Row(
+                            Modifier.minimumInteractiveComponentSize().clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer)
+                                .clickable { answer(g, cat) }.padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(categoryIcon(cat), null, Modifier.size(16.dp), tint = Categories.color(cat))
+                            Spacer(Modifier.width(6.dp))
+                            Text(cat, style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 }
-            }
-            Spacer(Modifier.height(14.dp))
-        }
-
-        Text(if (top.isEmpty()) "Pick a category" else "Or pick another", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(6.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Categories.expense.filter { it != t.category && it !in top.map { x -> x.first } }.forEach { cat ->
-                Row(
-                    Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer)
-                        .clickable { answer(g, cat) }.padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(categoryIcon(cat), null, Modifier.size(16.dp), tint = Categories.color(cat))
-                    Spacer(Modifier.width(6.dp))
-                    Text(cat, style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { index++ }) { Text("Skip") }
+                    Spacer(Modifier.weight(1f))
+                    OutlinedButton(onClick = { answer(g, t.category) }) {
+                        Icon(Icons.Rounded.Check, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Keep ${t.category}")
+                    }
                 }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { index++ }) { Text("Skip") }
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = { answer(g, t.category) }) {
-                Icon(Icons.Rounded.Check, null, Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Keep ${t.category}")
-            }
+          }
         }
         Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Lock, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(6.dp))
             Text(
-                if (g.size > 1) "Applies to all ${g.size} payments to this merchant. AI runs on this phone." else "AI runs on this phone. Your messages are never uploaded.",
+                if (groups[index].size > 1) "Applies to all ${groups[index].size} payments to this merchant. AI runs on this phone." else "AI runs on this phone. Your messages are never uploaded.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

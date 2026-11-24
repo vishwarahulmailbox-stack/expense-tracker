@@ -79,10 +79,12 @@ fun TransactionsScreen(
             Spacer(Modifier.weight(1f))
             ExportMenu(onExport)
         }
-        when (tab) {
-            1 -> CategoriesTab(s, txns, onCategory, onSetBudget, onCategorise, othersCount)
-            2 -> MerchantsTab(txns, onMerchant)
-            else -> TxnListTab(s.copy(txns = txns), onTxn)
+        androidx.compose.animation.Crossfade(targetState = tab, animationSpec = androidx.compose.animation.core.tween(220), label = "tabs") { t ->
+            when (t) {
+                1 -> CategoriesTab(s, txns, onCategory, onSetBudget, onCategorise, othersCount)
+                2 -> MerchantsTab(txns, onMerchant)
+                else -> TxnListTab(s.copy(txns = txns), onTxn)
+            }
         }
     }
 }

@@ -5,6 +5,9 @@ package com.expensetracker.sms.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,6 +53,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -106,7 +110,7 @@ fun SegmentedTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
     Row(
         modifier
             .fillMaxWidth()
-            .height(40.dp)
+            .height(48.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(3.dp),
@@ -119,7 +123,7 @@ fun SegmentedTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
                     .fillMaxHeight()
                     .clip(CircleShape)
                     .background(if (on) MaterialTheme.colorScheme.surfaceContainerLowest else Color.Transparent)
-                    .clickable { onSelect(i) },
+                    .selectable(selected = on, role = androidx.compose.ui.semantics.Role.Tab) { onSelect(i) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -144,7 +148,7 @@ fun AccountFilter(accounts: List<Account>, selected: String?, onSelect: (String?
         Surface(
             shape = CircleShape,
             color = if (selected != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest,
-            modifier = Modifier.clip(CircleShape).clickable { open = true },
+            modifier = Modifier.minimumInteractiveComponentSize().clip(CircleShape).clickable { open = true },
         ) {
             Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.AccountBalance, null, Modifier.size(16.dp))
@@ -193,7 +197,7 @@ fun MonthBars(
                     Text(
                         if (values[i] > 0) compact(values[i]) else "",
                         style = MaterialTheme.typography.labelSmall,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
                         color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -351,7 +355,7 @@ fun CategoriesTab(
                                             "Set budget",
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.clip(CircleShape).clickable { onSetBudget(cat) }.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            modifier = Modifier.minimumInteractiveComponentSize().clip(CircleShape).clickable(onClickLabel = "Set budget for $cat") { onSetBudget(cat) }.padding(horizontal = 6.dp, vertical = 2.dp),
                                         )
                                     }
                                 }
@@ -365,7 +369,7 @@ fun CategoriesTab(
         if (income.isNotEmpty()) {
             item {
                 Column {
-                    SectionHeader(if (hidden) "Income 🔒" else "Income", if (hidden) "Show" else null) { reveal {} }
+                    SectionHeader(if (hidden) "Income · locked" else "Income", if (hidden) "Show" else null) { reveal {} }
                     AppCard(padding = PaddingValues(vertical = 4.dp)) {
                         income.forEachIndexed { i, (cat, amt) ->
                             Row(
@@ -586,7 +590,7 @@ fun CategoriseContent(
             Column(Modifier.weight(1f)) {
                 Text("Categorise", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    if (left.isEmpty()) "All sorted 🎉" else "${left.sumOf { it.second.size }} payments in Others · ${left.size} merchants",
+                    if (left.isEmpty()) "All sorted" else "${left.sumOf { it.second.size }} payments in Others · ${left.size} merchants",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -606,7 +610,7 @@ fun CategoriseContent(
         ) {
             items(left, key = { it.first.key }) { (m, txns) ->
                 val suggestions = remember(m.key) { suggestionsFor(m.name).filter { it.first != Categories.OTHERS }.take(3) }
-                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.animateItem()) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -642,6 +646,7 @@ fun CategoriseContent(
 private fun SuggestChip(label: String, extra: String?, color: Color, onClick: () -> Unit) {
     Row(
         Modifier
+            .minimumInteractiveComponentSize()
             .clip(CircleShape)
             .background(color.copy(alpha = 0.12f))
             .clickable(onClick = onClick)
@@ -685,7 +690,7 @@ fun TrendsScreen(s: UiState, onAccountFilter: (String?) -> Unit, onReview: (Year
                 Spacer(Modifier.weight(1f))
                 LegendDot(MaterialTheme.colorScheme.primary, "Spent")
                 Spacer(Modifier.width(10.dp))
-                LegendDot(AppColors.income, if (hidden) "Income 🔒" else "Income", Modifier.clickable { if (hidden) reveal {} })
+                LegendDot(AppColors.income, if (hidden) "Income · locked" else "Income", Modifier.clickable { if (hidden) reveal {} })
             }
         }
         item {
@@ -711,7 +716,7 @@ fun TrendsScreen(s: UiState, onAccountFilter: (String?) -> Unit, onReview: (Year
                 Spacer(Modifier.height(12.dp))
                 Row {
                     StatCell("Spent", fmt(cur.spent), Modifier.weight(1f))
-                    StatCell(if (hidden) "Income 🔒" else "Income", incomeAmount(cur.income), Modifier.weight(1f).clickable { if (hidden) reveal {} }, AppColors.income)
+                    StatCell(if (hidden) "Income · locked" else "Income", incomeAmount(cur.income), Modifier.weight(1f).clickable { if (hidden) reveal {} }, AppColors.income)
                     StatCell(
                         "Saved",
                         if (hidden) MASK else fmt(cur.income - cur.spent),
@@ -809,7 +814,7 @@ fun RecapScreen(s: UiState, month: YearMonth, onTxn: (Txn) -> Unit, onCategory: 
                     ThinProgress(r.spent / b, if (r.spent > b) Color(0xFFFCA5A5) else Color.White, track = Color.White.copy(alpha = 0.2f))
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        if (r.spent <= b) "Within budget — ${fmt(b - r.spent)} to spare 👏" else "Over budget by ${fmt(r.spent - b)}",
+                        if (r.spent <= b) "Within budget — ${fmt(b - r.spent)} to spare" else "Over budget by ${fmt(r.spent - b)}",
                         color = Color.White, style = MaterialTheme.typography.labelMedium,
                     )
                 }
@@ -824,7 +829,7 @@ fun RecapScreen(s: UiState, month: YearMonth, onTxn: (Txn) -> Unit, onCategory: 
                 }
                 Spacer(Modifier.height(10.dp))
                 Row {
-                    StatCell(if (hidden) "Income 🔒" else "Income", incomeAmount(r.income), Modifier.weight(1f).clickable { if (hidden) reveal {} }, AppColors.income)
+                    StatCell(if (hidden) "Income · locked" else "Income", incomeAmount(r.income), Modifier.weight(1f).clickable { if (hidden) reveal {} }, AppColors.income)
                     StatCell(
                         "Saved",
                         if (hidden) MASK else fmt(r.income - r.spent),
@@ -983,7 +988,7 @@ fun TagLine(tags: List<String>, modifier: Modifier = Modifier) {
     Text(
         tags.joinToString(" ") { "#$it" },
         style = MaterialTheme.typography.labelSmall,
-        fontSize = 10.sp,
+        fontSize = 11.sp,
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -1012,7 +1017,7 @@ fun TagsEditor(auto: List<String>, tags: List<String>, onChange: (List<String>) 
         }
         tags.forEach { t ->
             Row(
-                Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer).clickable { onChange(tags - t) }
+                Modifier.minimumInteractiveComponentSize().clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer).clickable(onClickLabel = "Remove tag $t") { onChange(tags - t) }
                     .padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1056,7 +1061,7 @@ fun Greeting(name: String?, month: YearMonth) {
         else -> "Good evening"
     }
     Column(Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp)) {
-        Text(if (name != null) "Hi $name 👋" else "$hello 👋", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(if (name != null) "Hi $name" else hello, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         Text(
             if (name != null) "$hello · here's your ${monthName(month)}" else "Here's your ${monthName(month)}",
             style = MaterialTheme.typography.bodySmall,
@@ -1082,7 +1087,7 @@ fun ShortcutRow(items: List<Triple<String, androidx.compose.ui.graphics.vector.I
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { (label, icon, onClick) ->
             Row(
-                Modifier.weight(1f).height(40.dp).clip(CircleShape)
+                Modifier.weight(1f).height(48.dp).clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerLowest).clickable(onClick = onClick),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
@@ -1131,7 +1136,14 @@ fun BillsCalendar(bills: List<com.expensetracker.sms.Bill>, month: YearMonth, to
                                             else -> Color.Transparent
                                         }
                                     )
-                                    .clickable { selDay = d },
+                                    .clickable { selDay = d }
+                                    .semantics {
+                                        contentDescription = "$d ${monthName(month)}" + when (dayBills.size) {
+                                            0 -> ""
+                                            1 -> ", 1 bill"
+                                            else -> ", ${dayBills.size} bills"
+                                        }
+                                    },
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
                             ) {
@@ -1152,6 +1164,16 @@ fun BillsCalendar(bills: List<com.expensetracker.sms.Bill>, month: YearMonth, to
                 }
             }
         }
+    }
+    // Colour is never the only signal: a legend names each dot colour, and the list below spells out the status.
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Center) {
+        LegendDot(AppColors.income, "Paid")
+        Spacer(Modifier.width(14.dp))
+        LegendDot(AppColors.warning, "Due soon")
+        Spacer(Modifier.width(14.dp))
+        LegendDot(MaterialTheme.colorScheme.onSurfaceVariant, "Later")
+        Spacer(Modifier.width(14.dp))
+        LegendDot(AppColors.danger, "Overdue / today")
     }
     val dayBills = byDay[selDay].orEmpty()
     Spacer(Modifier.height(10.dp))

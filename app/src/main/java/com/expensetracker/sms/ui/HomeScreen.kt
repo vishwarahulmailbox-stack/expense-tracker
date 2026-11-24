@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.rounded.NorthEast
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.EmojiEvents
@@ -198,7 +199,7 @@ private fun HeroCard(s: UiState, onOpenBudgets: () -> Unit) {
             val hidden = LocalIncomeHidden.current
             val reveal = LocalRevealIncome.current
             HeroStat(
-                if (hidden) "Income 🔒" else "Income",
+                if (hidden) "Income · locked" else "Income",
                 incomeAmount(s.income),
                 Modifier.weight(1f).then(if (hidden) Modifier.clickable { reveal {} } else Modifier),
             )
@@ -376,14 +377,19 @@ fun TxnRow(t: Txn, onClick: () -> Unit) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(t.merchant, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                (if (t.aiConf != null && !t.aiReviewed) "✨ " else "") +
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (t.aiConf != null && !t.aiReviewed) {
+                    Icon(Icons.Rounded.AutoAwesome, "Category picked by AI", Modifier.size(12.dp), tint = AiPurple)
+                    Spacer(Modifier.width(3.dp))
+                }
+                Text(
                     listOfNotNull(t.category, time, t.account?.let { "••$it" }, t.note.ifBlank { null }).joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
         Column(horizontalAlignment = Alignment.End) {

@@ -276,6 +276,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteCategory(def: CategoryDef) = io { db.deleteCategory(def) }
 
     fun renameAccount(key: String, nickname: String?) = io { db.setNickname(key, nickname) }
+    fun setAccountType(key: String, type: AcctType?) = io { db.setAccountType(key, type) }
+    fun setAccountHidden(key: String, hidden: Boolean) {
+        if (hidden && state.accountFilter == key) setAccountFilter(null)
+        io { db.setAccountHidden(key, hidden) }
+    }
 
     // ------------------------------------------------------------- bills
 

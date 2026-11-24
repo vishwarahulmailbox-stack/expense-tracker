@@ -6,6 +6,7 @@ enum class AcctType(val label: String) {
     CREDIT_CARD("Credit card"),
     DEBIT_CARD("Debit card"),
     WALLET("Wallet"),
+    LOAN("Loan account"),
 }
 
 data class BankInfo(val name: String, val start: Long, val end: Long)

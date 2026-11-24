@@ -400,6 +400,8 @@ private fun MainScaffold(vm: AppViewModel, onPrivacy: () -> Unit, launch: Launch
                     onSelect = { selectedAccount = it },
                     onTxn = openTxn,
                     onRename = vm::renameAccount,
+                    onSetType = vm::setAccountType,
+                    onSetHidden = vm::setAccountHidden,
                 )
                 Dest.Budget -> BudgetScreen(s, onEdit = { budgetEdit = BudgetEdit.Of(it) })
                 Dest.Settings -> if (showCategories) {

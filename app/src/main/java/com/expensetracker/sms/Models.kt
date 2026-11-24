@@ -55,6 +55,10 @@ data class Account(
     val monthCount: Int,
     val totalCount: Int,
     val lastTs: Long,
+    /** Hidden from the Accounts tab and account filters (its transactions still count). */
+    val hidden: Boolean = false,
+    /** Type chosen by you instead of guessed from SMS. */
+    val typeSet: Boolean = false,
 )
 
 enum class CatType { EXPENSE, INCOME, NEUTRAL }

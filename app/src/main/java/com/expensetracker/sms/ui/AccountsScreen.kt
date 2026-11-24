@@ -25,6 +25,11 @@ import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Payment
+import androidx.compose.material.icons.rounded.RequestQuote
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -68,14 +73,28 @@ fun typeIcon(t: AcctType): ImageVector = when (t) {
     AcctType.CREDIT_CARD -> Icons.Rounded.CreditCard
     AcctType.DEBIT_CARD -> Icons.Rounded.Payment
     AcctType.WALLET -> Icons.Rounded.AccountBalanceWallet
+    AcctType.LOAN -> Icons.Rounded.RequestQuote
+}
+
+private fun noun(t: AcctType) = when (t) {
+    AcctType.BANK, AcctType.LOAN, AcctType.WALLET -> "account"
+    else -> "card"
 }
 
 /** List of all accounts / cards as bank-coloured cards. Tap one to see its transactions. */
 @Composable
-fun AccountsScreen(s: UiState, selectedKey: String?, onSelect: (String?) -> Unit, onTxn: (Txn) -> Unit, onRename: (String, String?) -> Unit) {
+fun AccountsScreen(
+    s: UiState,
+    selectedKey: String?,
+    onSelect: (String?) -> Unit,
+    onTxn: (Txn) -> Unit,
+    onRename: (String, String?) -> Unit,
+    onSetType: (String, AcctType?) -> Unit = { _, _ -> },
+    onSetHidden: (String, Boolean) -> Unit = { _, _ -> },
+) {
     val selected = s.accounts.firstOrNull { it.key == selectedKey }
     if (selected != null) {
-        AccountDetail(selected, s.txns.filter { it.accountKey == selected.key }, onTxn, onRename)
+        AccountDetail(selected, s.txns.filter { it.accountKey == selected.key }, onTxn, onRename, onSetType, onSetHidden)
         return
     }
     if (s.accounts.isEmpty()) {
@@ -87,24 +106,39 @@ fun AccountsScreen(s: UiState, selectedKey: String?, onSelect: (String?) -> Unit
         return
     }
 
-    val banks = s.accounts.filter { it.type == AcctType.BANK }
-    val cards = s.accounts.filter { it.type == AcctType.CREDIT_CARD }
-    val others = s.accounts.filter { it.type != AcctType.BANK && it.type != AcctType.CREDIT_CARD }
+    val shown = s.accounts.filter { !it.hidden }
+    val hidden = s.accounts.filter { it.hidden }
+    val banks = shown.filter { it.type == AcctType.BANK }
+    val cards = shown.filter { it.type == AcctType.CREDIT_CARD }
+    val loans = shown.filter { it.type == AcctType.LOAN }
+    val others = shown.filter { it.type == AcctType.DEBIT_CARD || it.type == AcctType.WALLET }
+    var showHidden by remember { mutableStateOf(false) }
 
     LazyColumn(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item { AccountsSummary(s.accounts) }
+        item { AccountsSummary(shown.filter { it.type != AcctType.LOAN }) }
         listOf("Bank accounts" to banks, "Credit cards" to cards, "Debit cards & wallets" to others).forEach { (title, list) ->
             if (list.isNotEmpty()) {
                 item(key = "h-$title") { SectionHeader("$title · ${list.size}") }
-                items(list, key = { it.key }) { a -> BankCard(a, Modifier.clickable { onSelect(a.key) }) }
+                items(list, key = { it.key }) { a -> BankCard(a, Modifier.clip(RoundedCornerShape(20.dp)).clickable { onSelect(a.key) }) }
             }
+        }
+        // Loans aren't money you hold, so they get a slim list instead of a bank card.
+        if (loans.isNotEmpty()) {
+            item(key = "h-loans") { SectionHeader("Loans · ${loans.size}") }
+            item(key = "loans") { AccountList(loans, onSelect) }
+        }
+        if (hidden.isNotEmpty()) {
+            item(key = "h-hidden") {
+                SectionHeader("Hidden · ${hidden.size}", if (showHidden) "Collapse" else "Show") { showHidden = !showHidden }
+            }
+            if (showHidden) item(key = "hidden") { AccountList(hidden, onSelect, unhide = { onSetHidden(it, false) }) }
         }
         item {
             Text(
-                "Balances come from the latest SMS that mentioned one. Tap a card to see its transactions or give it a name.",
+                "Balances come from the latest SMS that mentioned one. Tap a card to rename it, change its type (e.g. loan account) or hide it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
@@ -137,6 +171,43 @@ private fun SummaryCell(label: String, value: String, modifier: Modifier) {
 }
 
 /** A credit-card-shaped tile in the bank's colours. */
+/** Compact rows for loans and hidden accounts. */
+@Composable
+private fun AccountList(list: List<Account>, onSelect: (String?) -> Unit, unhide: ((String) -> Unit)? = null) {
+    AppCard(padding = PaddingValues(vertical = 4.dp)) {
+        list.forEachIndexed { i, a ->
+            Row(
+                Modifier.fillMaxWidth().clickable { onSelect(a.key) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val (c1, _) = Banks.colorsFor(a.bank)
+                IconBadgeVector(typeIcon(a.type), Color(c1))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(a.nickname ?: a.bank, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "${a.type.label} ••${a.last4} · ${a.totalCount} SMS" + if (a.monthSpent > 0) " · ${fmt(a.monthSpent)} this month" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (unhide != null) TextButton(onClick = { unhide(a.key) }) { Text("Unhide") }
+            }
+            if (i < list.lastIndex) RowDivider()
+        }
+    }
+}
+
+@Composable
+private fun IconBadgeVector(icon: ImageVector, color: Color) {
+    Box(
+        Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.14f)),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, null, Modifier.size(20.dp), tint = color) }
+}
+
 @Composable
 fun BankCard(a: Account, modifier: Modifier = Modifier) {
     val (c1, c2) = Banks.colorsFor(a.bank)
@@ -168,7 +239,7 @@ fun BankCard(a: Account, modifier: Modifier = Modifier) {
             Spacer(Modifier.weight(1f))
             // Chip + number
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (a.type != AcctType.BANK) {
+                if (a.type == AcctType.CREDIT_CARD || a.type == AcctType.DEBIT_CARD) {
                     Box(
                         Modifier.size(width = 34.dp, height = 26.dp).clip(RoundedCornerShape(6.dp))
                             .background(Brush.linearGradient(listOf(Color(0xFFF5D98B), Color(0xFFC9A44C)))),
@@ -176,7 +247,11 @@ fun BankCard(a: Account, modifier: Modifier = Modifier) {
                     Spacer(Modifier.width(12.dp))
                 }
                 Text(
-                    if (a.type == AcctType.BANK) "A/c  ••••  ${a.last4}" else "••••  ••••  ••••  ${a.last4}",
+                    when (a.type) {
+                        AcctType.BANK, AcctType.WALLET -> "A/c  ••••  ${a.last4}"
+                        AcctType.LOAN -> "Loan  ••••  ${a.last4}"
+                        else -> "••••  ••••  ••••  ${a.last4}"
+                    },
                     color = white,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 17.sp,
@@ -210,8 +285,16 @@ fun BankCard(a: Account, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun AccountDetail(a: Account, txns: List<Txn>, onTxn: (Txn) -> Unit, onRename: (String, String?) -> Unit) {
+private fun AccountDetail(
+    a: Account,
+    txns: List<Txn>,
+    onTxn: (Txn) -> Unit,
+    onRename: (String, String?) -> Unit,
+    onSetType: (String, AcctType?) -> Unit,
+    onSetHidden: (String, Boolean) -> Unit,
+) {
     var renaming by remember { mutableStateOf(false) }
+    var choosingType by remember { mutableStateOf(false) }
     val byCat = txns.filter { it.isDebit && !it.ignored }.groupBy { it.category }
         .mapValues { e -> e.value.sumOf { it.amount } }.entries.sortedByDescending { it.value }
 
@@ -235,10 +318,43 @@ private fun AccountDetail(a: Account, txns: List<Txn>, onTxn: (Txn) -> Unit, onR
                     Icon(Icons.Rounded.Edit, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        if (a.nickname == null) "Give this ${if (a.type == AcctType.BANK) "account" else "card"} a name" else "Rename “${a.nickname}”",
+                        if (a.nickname == null) "Give this ${noun(a.type)} a name" else "Rename “${a.nickname}”",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                     )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    Modifier.fillMaxWidth().clickable { choosingType = true }.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(typeIcon(a.type), null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Type: ${a.type.label}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            if (a.typeSet) "Set by you" else "Guessed from SMS · tap if it's wrong (e.g. a loan account)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    Modifier.fillMaxWidth().clickable { onSetHidden(a.key, !a.hidden) }.padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Hide from Accounts", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            "Not a real account? Hide it. Its transactions stay in your totals.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = a.hidden, onCheckedChange = { onSetHidden(a.key, it) })
                 }
             }
         }
@@ -284,7 +400,7 @@ private fun AccountDetail(a: Account, txns: List<Txn>, onTxn: (Txn) -> Unit, onR
         var text by remember { mutableStateOf(a.nickname ?: "") }
         AlertDialog(
             onDismissRequest = { renaming = false },
-            title = { Text("Name this ${if (a.type == AcctType.BANK) "account" else "card"}") },
+            title = { Text("Name this ${noun(a.type)}") },
             text = {
                 OutlinedTextField(
                     value = text,
@@ -296,6 +412,37 @@ private fun AccountDetail(a: Account, txns: List<Txn>, onTxn: (Txn) -> Unit, onR
             },
             confirmButton = { TextButton(onClick = { renaming = false; onRename(a.key, text) }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (choosingType) {
+        AlertDialog(
+            onDismissRequest = { choosingType = false },
+            title = { Text("What is ••${a.last4}?") },
+            text = {
+                Column {
+                    AcctType.entries.forEach { t ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                .selectable(selected = a.type == t, role = androidx.compose.ui.semantics.Role.RadioButton) {
+                                    choosingType = false; onSetType(a.key, t)
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = a.type == t, onClick = null)
+                            Spacer(Modifier.width(8.dp))
+                            Icon(typeIcon(t), null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(t.label, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                    if (a.typeSet) {
+                        TextButton(onClick = { choosingType = false; onSetType(a.key, null) }) { Text("Let the app guess again") }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingType = false }) { Text("Close") } },
         )
     }
 }

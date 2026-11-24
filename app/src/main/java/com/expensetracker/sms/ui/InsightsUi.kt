@@ -159,7 +159,7 @@ fun AccountFilter(accounts: List<Account>, selected: String?, onSelect: (String?
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("All accounts") }, onClick = { open = false; onSelect(null) })
-            accounts.forEach { a ->
+            accounts.filter { !it.hidden }.forEach { a ->
                 DropdownMenuItem(text = { Text(accountLabel(a)) }, onClick = { open = false; onSelect(a.key) })
             }
         }

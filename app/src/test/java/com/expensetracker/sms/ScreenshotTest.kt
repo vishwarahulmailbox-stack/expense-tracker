@@ -161,6 +161,16 @@ class ScreenshotTest {
     @Test fun editSheet() = shot("6_edit_sheet") { Box { TxnEditorContent(txns[0], { _, _ -> }, {}) } }
     @Test fun addSheet() = shot("7_add_sheet") { AddTxnContent(onSave = {}) }
     @Test fun accounts() = shot("10_accounts") { WithMonth { AccountsScreen(state, null, {}, {}, { _, _ -> }) } }
+    @Test fun accountsLoanHidden() = shot("10c_accounts_loan_hidden") {
+        val acc = state.accounts.mapIndexed { i, a ->
+            when (i) {
+                1 -> a.copy(type = AcctType.LOAN, typeSet = true, nickname = "Home loan", balance = null)
+                2 -> a.copy(hidden = true)
+                else -> a
+            }
+        }
+        WithMonth { AccountsScreen(state.copy(accounts = acc), null, {}, {}, { _, _ -> }) }
+    }
     @Test fun accountDetail() = shot("10b_account_detail") { WithMonth { AccountsScreen(state, state.accounts[0].key, {}, {}, { _, _ -> }) } }
     @Test fun skipped() = shot("11_skipped") {
         com.expensetracker.sms.ui.SkippedScreen(

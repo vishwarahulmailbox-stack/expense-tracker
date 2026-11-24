@@ -16,7 +16,7 @@ object DataBus {
     fun bump() = version.update { it + 1 }
 }
 
-class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 7) {
+class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db", null, 8) {
 
     companion object {
         @Volatile private var inst: Db? = null
@@ -56,6 +56,7 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         upgradeToV5(db)
         upgradeToV6(db)
         upgradeToV7(db)
+        upgradeToV8(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -65,9 +66,16 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
         if (oldVersion < 5) upgradeToV5(db)
         if (oldVersion < 6) upgradeToV6(db)
         if (oldVersion < 7) upgradeToV7(db)
+        if (oldVersion < 8) upgradeToV8(db)
     }
 
     /** v7: your own tags on transactions. */
+    /** v8: per-account type override (e.g. "this is a loan account") and hide flag. */
+    private fun upgradeToV8(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE accounts ADD COLUMN type TEXT")
+        db.execSQL("ALTER TABLE accounts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+    }
+
     private fun upgradeToV7(db: SQLiteDatabase) {
         db.execSQL("ALTER TABLE txns ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
     }
@@ -368,19 +376,53 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
             buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1)) }
         }
 
-    fun setNickname(key: String, nickname: String?) {
-        val cv = ContentValues().apply { put("key", key); put("nickname", nickname?.trim()?.ifBlank { null }) }
-        writableDatabase.insertWithOnConflict("accounts", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    /** Update one account's settings without wiping the others (nickname, type, hidden). */
+    private fun upsertAccount(key: String, cv: ContentValues) {
+        val w = writableDatabase
+        if (w.update("accounts", cv, "key=?", arrayOf(key)) == 0) {
+            cv.put("key", key)
+            w.insert("accounts", null, cv)
+        }
     }
+
+    fun setNickname(key: String, nickname: String?) =
+        upsertAccount(key, ContentValues().apply { put("nickname", nickname?.trim()?.ifBlank { null }) })
+
+    /** null = guess from SMS again. */
+    fun setAccountType(key: String, type: AcctType?) =
+        upsertAccount(key, ContentValues().apply { put("type", type?.name) })
+
+    fun setAccountHidden(key: String, hidden: Boolean) =
+        upsertAccount(key, ContentValues().apply { put("hidden", if (hidden) 1 else 0) })
+
+    private data class AcctPrefs(val type: AcctType?, val hidden: Boolean)
+
+    private fun accountPrefs(): Map<String, AcctPrefs> =
+        readableDatabase.rawQuery("SELECT key, type, hidden FROM accounts", null).use { c ->
+            buildMap {
+                while (c.moveToNext()) {
+                    val t = c.getString(1)?.let { n -> AcctType.entries.firstOrNull { it.name == n } }
+                    put(c.getString(0), AcctPrefs(t, c.getInt(2) == 1))
+                }
+            }
+        }
+
+    private val loanRx = Regex("""\bloan\b""", RegexOption.IGNORE_CASE)
 
     /** Every account / card seen in SMS, with this month's activity and the latest known balance. */
     fun accounts(ym: YearMonth): List<Account> {
         val (start, end) = monthRange(ym)
         val names = nicknames()
+        val prefs = accountPrefs()
         return allTxns().filter { it.accountKey != null }.groupBy { it.accountKey!! }.map { (key, list) ->
             val latest = list.maxBy { it.timestamp }
             val withBal = list.filter { it.balance != null }.maxByOrNull { it.timestamp }
-            val type = list.mapNotNull { it.acctType }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: AcctType.BANK
+            val pref = prefs[key]
+            // Most SMS for this number talk about a loan → it's a loan account, not a bank account.
+            val looksLoan = list.count { loanRx.containsMatchIn(it.body) } * 2 > list.size
+            val type = pref?.type
+                ?: if (looksLoan) AcctType.LOAN
+                else list.mapNotNull { it.acctType }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: AcctType.BANK
             val month = list.filter { it.timestamp in start until end && !it.ignored }
             Account(
                 key = key,
@@ -395,6 +437,8 @@ class Db private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "expenses.db"
                 monthCount = list.count { it.timestamp in start until end },
                 totalCount = list.size,
                 lastTs = latest.timestamp,
+                hidden = pref?.hidden == true,
+                typeSet = pref?.type != null,
             )
         }.sortedWith(compareBy<Account>({ it.type.ordinal }, { -it.lastTs }))
     }

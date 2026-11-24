@@ -329,13 +329,13 @@ fun CategoriesTab(
                         ) {
                             CategoryBadge(cat, 38.dp)
                             Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(cat, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(fmt(amt), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                if (budget != null) {
+                            if (budget != null) {
+                                Column(Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(cat, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(fmt(amt), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
                                     ThinProgress(amt / budget, budgetColor(amt / budget), height = 5.dp)
                                     Spacer(Modifier.height(3.dp))
                                     Text(
@@ -343,21 +343,26 @@ fun CategoriesTab(
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (amt > budget) AppColors.danger else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                } else {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            "${counts[cat] ?: 0} payment${if ((counts[cat] ?: 0) == 1) "" else "s"} · ${Math.round(amt / total * 100)}%",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        Text(
-                                            "Set budget",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.minimumInteractiveComponentSize().clip(CircleShape).clickable(onClickLabel = "Set budget for $cat") { onSetBudget(cat) }.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        )
-                                    }
+                                }
+                            } else {
+                                Column(Modifier.weight(1f)) {
+                                    Text(cat, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        "${counts[cat] ?: 0} payment${if ((counts[cat] ?: 0) == 1) "" else "s"} · ${Math.round(amt / total * 100)}%",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                // Amount + "Set budget" share one 48dp tap area, so the row stays compact.
+                                Column(
+                                    Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(10.dp))
+                                        .clickable(onClickLabel = "Set budget for $cat") { onSetBudget(cat) }
+                                        .padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
+                                    horizontalAlignment = Alignment.End,
+                                ) {
+                                    Text(fmt(amt), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                    Text("Set budget", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }

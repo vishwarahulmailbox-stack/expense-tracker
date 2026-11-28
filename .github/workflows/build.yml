@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.10.2"
+          gradle-version: "8.11.1"
 
       - name: Build release APK
         run: gradle assembleRelease --stacktrace
@@ -36,7 +36,34 @@ jobs:
           name: ExpenseTracker-APK
           path: out/*.apk
 
+      # Play Store bundle (.aab). Signed with the upload key from repo secrets
+      # (UPLOAD_KEYSTORE_BASE64, UPLOAD_STORE_PASSWORD, UPLOAD_KEY_ALIAS, UPLOAD_KEY_PASSWORD).
+      # Without those secrets it is signed with the old key.
+      - name: Build Play Store bundle (AAB)
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [ -n "$UPLOAD_KEYSTORE_BASE64" ]; then
+            echo "$UPLOAD_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            export UPLOAD_KEYSTORE_PATH="$RUNNER_TEMP/upload.jks"
+            echo "Signing bundle with the upload key"
+          else
+            echo "::warning::Upload key secrets not set; bundle signed with the old key"
+          fi
+          gradle bundleRelease -PplayUpload --stacktrace
+          cp app/build/outputs/bundle/release/app-release.aab out/ExpenseTracker-v1.0.${{ github.run_number }}.aab
+          rm -f "$RUNNER_TEMP/upload.jks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExpenseTracker-AAB-PlayStore
+          path: out/*.aab
+
       - name: Publish release (direct APK download link)
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
@@ -59,7 +86,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.10.2"
+          gradle-version: "8.11.1"
 
       - name: Render screenshots
         run: gradle recordRoborazziDebug --stacktrace
@@ -71,7 +98,7 @@ jobs:
           path: app/build/outputs/roborazzi/
 
       - name: Publish screenshots to the 'screenshots' branch
-        if: always()
+        if: always() && github.ref == 'refs/heads/main'
         run: |
           set -e
           mkdir -p /tmp/shots && cp app/build/outputs/roborazzi/*.png /tmp/shots/ || exit 0

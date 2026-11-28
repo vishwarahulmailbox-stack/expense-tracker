@@ -9,22 +9,34 @@ val buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 
 android {
     namespace = "com.expensetracker.sms"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.expensetracker.sms"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
     }
 
     signingConfigs {
+        // Old key, used for the GitHub APK builds you install directly on your phone.
         create("app") {
             storeFile = file("app.keystore")
             storePassword = "expense123"
             keyAlias = "expense"
             keyPassword = "expense123"
+        }
+        // Play Store upload key. Comes from GitHub secrets on CI (never committed).
+        // If the secrets aren't set yet, the Play bundle falls back to the old key.
+        val uploadStore = System.getenv("UPLOAD_KEYSTORE_PATH")
+        if (!uploadStore.isNullOrBlank() && file(uploadStore).exists()) {
+            create("upload") {
+                storeFile = file(uploadStore)
+                storePassword = System.getenv("UPLOAD_STORE_PASSWORD")
+                keyAlias = System.getenv("UPLOAD_KEY_ALIAS")
+                keyPassword = System.getenv("UPLOAD_KEY_PASSWORD")
+            }
         }
     }
 
@@ -33,7 +45,10 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("app")
+            // `gradle bundleRelease -PplayUpload` signs the Play bundle with the upload key (when set up)
+            val upload = signingConfigs.findByName("upload")
+            signingConfig = if (project.hasProperty("playUpload") && upload != null) upload
+                            else signingConfigs.getByName("app")
         }
         debug {
             signingConfig = signingConfigs.getByName("app")
